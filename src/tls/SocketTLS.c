@@ -3,7 +3,6 @@
  * Copyright (c) 2025 Tetsuo AI
  * https://x.com/tetsuoai
  */
-
 /**
  * SocketTLS.c - TLS Socket Integration
  *
@@ -20,9 +19,7 @@
  * Thread safety: Functions are not thread-safe; each socket is
  * single-threaded. Uses thread-local error buffers for exception details.
  */
-
 #if SOCKET_HAS_TLS
-
 #include <assert.h>
 #include <errno.h>
 #include <limits.h>
@@ -31,7 +28,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
-
 #include "core/SocketCrypto.h"
 #include "core/SocketMetrics.h"
 #include "core/SocketUtil.h"
@@ -39,7 +35,6 @@
 #include "tls/SocketSSL-internal.h"
 #include "tls/SocketTLS-private.h"
 #include "tls/SocketTLSContext.h"
-
 /**
  * @brief Small poll capacity for single-FD handshake polling.
  * @ingroup security
@@ -48,9 +43,7 @@
  * 16 events is more than sufficient for single-socket handshake operations.
  */
 #define TLS_HANDSHAKE_POLL_CAPACITY 16
-
 #define T SocketTLS_T
-
 const Except_T SocketTLS_Failed = { &SocketTLS_Failed, "TLS operation failed" };
 const Except_T SocketTLS_HandshakeFailed
     = { &SocketTLS_HandshakeFailed, "TLS handshake failed" };
@@ -60,9 +53,7 @@ const Except_T SocketTLS_ProtocolError
     = { &SocketTLS_ProtocolError, "TLS protocol error" };
 const Except_T SocketTLS_ShutdownFailed
     = { &SocketTLS_ShutdownFailed, "TLS shutdown failed" };
-
 SOCKET_DECLARE_MODULE_EXCEPTION (SocketTLS);
-
 /**
  * tls_alloc_buf - Allocate a TLS buffer from socket arena
  * @socket: Socket instance
@@ -85,7 +76,6 @@ tls_alloc_buf (Socket_T socket, const char *purpose)
         SocketTLS_Failed, "Failed to allocate TLS %s buffer", purpose);
   return buf;
 }
-
 /**
  * allocate_tls_buffers - Allocate TLS read/write buffers
  * @socket: Socket instance
@@ -97,23 +87,19 @@ allocate_tls_buffers (Socket_T socket)
 {
   assert (socket);
   assert (SocketBase_arena (socket->base));
-
   if (!socket->tls_read_buf)
     {
       socket->tls_read_buf = tls_alloc_buf (socket, "read");
       socket->tls_read_buf_len = 0;
     }
-
   if (!socket->tls_write_buf)
     {
       socket->tls_write_buf = tls_alloc_buf (socket, "write");
       socket->tls_write_buf_len = 0;
     }
 }
-
 /* tls_secure_clear_buf is now provided by ssl_secure_clear_buf() in
  * SocketSSL-internal.h - use that shared implementation instead */
-
 /**
  * free_tls_resources - Cleanup TLS resources
  * @socket: Socket instance
@@ -127,7 +113,6 @@ static void
 free_tls_resources (Socket_T socket)
 {
   assert (socket);
-
   if (socket->tls_ssl)
     {
       SSL *ssl = (SSL *)socket->tls_ssl;
@@ -137,15 +122,12 @@ free_tls_resources (Socket_T socket)
       socket->tls_ssl = NULL;
       socket->tls_ctx = NULL;
     }
-
   /* Securely clear TLS buffers that may contain sensitive decrypted data */
   ssl_secure_clear_buf (socket->tls_read_buf, SOCKET_TLS_BUFFER_SIZE);
   ssl_secure_clear_buf (socket->tls_write_buf, SOCKET_TLS_BUFFER_SIZE);
-
   /* Clear SNI hostname (may contain sensitive connection info) */
   ssl_secure_clear_hostname (socket->tls_sni_hostname);
   socket->tls_sni_hostname = NULL;
-
   socket->tls_enabled = 0;
   socket->tls_handshake_done = 0;
   socket->tls_shutdown_done = 0;
@@ -154,7 +136,6 @@ free_tls_resources (Socket_T socket)
   socket->tls_read_buf_len = 0;
   socket->tls_write_buf_len = 0;
 }
-
 /**
  * validate_tls_enable_preconditions - Validate socket is ready for TLS
  * @socket: Socket to validate
@@ -166,12 +147,10 @@ validate_tls_enable_preconditions (Socket_T socket)
 {
   if (socket->tls_enabled)
     RAISE_TLS_ERROR_MSG (SocketTLS_Failed, "TLS already enabled on socket");
-
   int fd = SocketBase_fd (socket->base);
   if (fd < 0)
     RAISE_TLS_ERROR_MSG (SocketTLS_Failed, "Socket not connected (invalid fd)");
 }
-
 /**
  * require_client_hostname_verification - Enforce hostname verification setup
  * @socket: TLS-enabled socket
@@ -184,22 +163,17 @@ static void
 require_client_hostname_verification (Socket_T socket, SocketTLSContext_T ctx)
 {
   const char *hostname;
-
   if (!socket || !ctx)
     return;
-
   if (ctx->is_server || ctx->verify_mode == TLS_VERIFY_NONE)
     return;
-
   hostname = (const char *)socket->tls_sni_hostname;
   if (hostname && hostname[0] != '\0')
     return;
-
   RAISE_TLS_ERROR_MSG (SocketTLS_HandshakeFailed,
                        "Client hostname verification is not configured; call "
                        "SocketTLS_set_hostname() before SocketTLS_handshake()");
 }
-
 /**
  * create_ssl_object - Create and configure SSL object from context
  * @ctx: TLS context
@@ -213,12 +187,10 @@ create_ssl_object (SocketTLSContext_T ctx)
   SSL *ssl = SSL_new ((SSL_CTX *)SocketTLSContext_get_ssl_ctx (ctx));
   if (!ssl)
     RAISE_TLS_ERROR_MSG (SocketTLS_Failed, "Failed to create SSL object");
-
   if (SocketTLSContext_is_server (ctx))
     SSL_set_accept_state (ssl);
   else
     SSL_set_connect_state (ssl);
-
   /* Enable non-blocking modes for proper partial write handling */
   long mode = SSL_get_mode (ssl);
   SSL_set_mode (ssl,
@@ -228,10 +200,8 @@ create_ssl_object (SocketTLSContext_T ctx)
                     SSL_MODE_AUTO_RETRY
 #endif
   );
-
   return ssl;
 }
-
 /**
  * associate_ssl_with_fd - Associate SSL object with socket file descriptor
  * @ssl: SSL object
@@ -250,7 +220,6 @@ associate_ssl_with_fd (SSL *ssl, int fd)
       RAISE_TLS_ERROR_MSG (SocketTLS_Failed, "Failed to associate SSL with fd");
     }
 }
-
 /**
  * finalize_tls_state - Set final TLS state on socket
  * @socket: Socket to configure
@@ -264,12 +233,10 @@ finalize_tls_state (Socket_T socket, SSL *ssl, SocketTLSContext_T ctx)
   socket->tls_ctx = (void *)ctx;
   SSL_set_app_data (ssl, socket);
   allocate_tls_buffers (socket);
-
   socket->tls_enabled = 1;
   socket->tls_handshake_done = 0;
   socket->tls_shutdown_done = 0;
 }
-
 void
 SocketTLS_enable (Socket_T socket, SocketTLSContext_T ctx)
 {
@@ -279,14 +246,11 @@ SocketTLS_enable (Socket_T socket, SocketTLSContext_T ctx)
     RAISE_TLS_ERROR_MSG (SocketTLS_Failed, "TLS context cannot be NULL");
   if (!SocketTLSContext_get_ssl_ctx (ctx))
     RAISE_TLS_ERROR_MSG (SocketTLS_Failed, "TLS context has no SSL_CTX");
-
   validate_tls_enable_preconditions (socket);
-
   SSL *ssl = create_ssl_object (ctx);
   associate_ssl_with_fd (ssl, SocketBase_fd (socket->base));
   finalize_tls_state (socket, ssl, ctx);
 }
-
 /**
  * validate_hostname_nonempty - Validate hostname is non-empty
  * @hostname: Hostname to validate
@@ -304,7 +268,6 @@ validate_hostname_nonempty (const char *hostname, size_t len)
   if (len == 0)
     RAISE_TLS_ERROR_MSG (SocketTLS_Failed, "Hostname cannot be empty");
 }
-
 /**
  * copy_hostname_to_socket - Copy hostname to socket arena
  * @socket: Socket instance
@@ -319,10 +282,8 @@ copy_hostname_to_socket (Socket_T socket, const char *hostname, size_t len)
   if (!socket->tls_sni_hostname)
     RAISE_TLS_ERROR_MSG (SocketTLS_Failed,
                          "Failed to allocate hostname buffer");
-
   memcpy ((char *)socket->tls_sni_hostname, hostname, len + 1);
 }
-
 /**
  * apply_sni_to_ssl - Apply SNI hostname to SSL connection
  * @ssl: SSL object
@@ -343,20 +304,15 @@ apply_sni_to_ssl (SSL *ssl, const char *hostname)
     RAISE_TLS_ERROR_MSG (SocketTLS_Failed,
                          "Failed to enable hostname verification");
 }
-
 void
 SocketTLS_set_hostname (Socket_T socket, const char *hostname)
 {
   assert (socket);
-
   if (!hostname)
     RAISE_TLS_ERROR_MSG (SocketTLS_Failed, "Hostname cannot be NULL");
-
   REQUIRE_TLS_ENABLED (socket, SocketTLS_Failed);
-
   size_t hostname_len = strlen (hostname);
   validate_hostname_nonempty (hostname, hostname_len);
-
   /* Explicit SNI length check (RFC 6066 limit) before format validation */
   if (hostname_len > SOCKET_TLS_MAX_SNI_LEN)
     {
@@ -365,30 +321,22 @@ SocketTLS_set_hostname (Socket_T socket, const char *hostname)
                      SOCKET_TLS_MAX_SNI_LEN);
       RAISE_TLS_ERROR (SocketTLS_Failed);
     }
-
   if (!tls_validate_hostname (hostname))
     RAISE_TLS_ERROR_MSG (SocketTLS_Failed, "Invalid hostname format");
-
   copy_hostname_to_socket (socket, hostname, hostname_len);
-
   SSL *ssl = tls_socket_get_ssl (socket);
   if (!ssl)
     RAISE_TLS_ERROR_MSG (SocketTLS_Failed, "SSL object not available");
-
   apply_sni_to_ssl (ssl, hostname);
 }
-
 TLSHandshakeState
 SocketTLS_handshake (Socket_T socket)
 {
   if (!socket)
     RAISE_TLS_ERROR_MSG (SocketTLS_HandshakeFailed, "Socket cannot be NULL");
-
   REQUIRE_TLS_ENABLED (socket, SocketTLS_HandshakeFailed);
-
   if (socket->tls_handshake_done)
     return TLS_HANDSHAKE_COMPLETE;
-
   SSL *ssl = tls_socket_get_ssl (socket);
   SocketTLSContext_T ctx = (SocketTLSContext_T)socket->tls_ctx;
   if (!ssl)
@@ -397,22 +345,17 @@ SocketTLS_handshake (Socket_T socket)
       RAISE_TLS_ERROR_MSG (SocketTLS_HandshakeFailed,
                            "SSL object not available");
     }
-
   require_client_hostname_verification (socket, ctx);
-
   int result = SSL_do_handshake (ssl);
   if (result == 1)
     {
       socket->tls_handshake_done = 1;
       socket->tls_last_handshake_state = TLS_HANDSHAKE_COMPLETE;
       SocketMetrics_counter_inc (SOCKET_CTR_TLS_HANDSHAKES_TOTAL);
-
       /* Update kTLS offload status after successful handshake */
       ktls_on_handshake_complete (socket);
-
       return TLS_HANDSHAKE_COMPLETE;
     }
-
   TLSHandshakeState state = tls_handle_ssl_error (socket, ssl, result);
   if (state == TLS_HANDSHAKE_ERROR)
     {
@@ -421,11 +364,9 @@ SocketTLS_handshake (Socket_T socket)
       tls_format_openssl_error ("Handshake failed");
       RAISE_TLS_ERROR (SocketTLS_HandshakeFailed);
     }
-
   socket->tls_last_handshake_state = state;
   return state;
 }
-
 /**
  * state_to_poll_events - Map TLS handshake state to poll events
  * @state: Current handshake state
@@ -445,7 +386,76 @@ state_to_poll_events (TLSHandshakeState state)
       return POLL_READ | POLL_WRITE;
     }
 }
-
+/**
+ * poll_create_and_add - Create poll and add socket
+ * @events: Poll events
+ * @socket: Socket to add
+ * @error_out: Output error message
+ *
+ * Returns: SocketPoll_T on success, NULL on failure
+ */
+static SocketPoll_T
+poll_create_and_add (unsigned events, Socket_T socket, const char **error_out)
+{
+  SocketPoll_T poll = NULL;
+  volatile int alloc_failed = 0;
+  TRY
+  {
+    poll = SocketPoll_new (TLS_HANDSHAKE_POLL_CAPACITY);
+  }
+  ELSE
+  {
+    alloc_failed = 1;
+  }
+  END_TRY;
+  if (alloc_failed || !poll)
+    {
+      *error_out = "Failed to create temporary poll instance";
+      return NULL;
+    }
+  volatile int add_failed = 0;
+  TRY
+  {
+    SocketPoll_add (poll, socket, events, NULL);
+  }
+  ELSE
+  {
+    add_failed = 1;
+  }
+  END_TRY;
+  if (add_failed)
+    {
+      *error_out = "Failed to add socket to poll";
+      SocketPoll_free (&poll);
+      return NULL;
+    }
+  return poll;
+}
+/**
+ * poll_wait_and_free - Wait on poll and free it
+ * @poll: Poll instance
+ * @timeout_ms: Timeout
+ * @error_out: Output error message
+ *
+ * Returns: 1 on ready, 0 on timeout/EINTR, -1 on error
+ */
+static int
+poll_wait_and_free (SocketPoll_T poll, int timeout_ms, const char **error_out)
+{
+  SocketEvent_T evs[TLS_HANDSHAKE_POLL_CAPACITY];
+  SocketEvent_T *events_out = evs;
+  int rc = SocketPoll_wait (poll, &events_out, timeout_ms);
+  int saved_errno = errno;
+  SocketPoll_free (&poll);
+  if (rc < 0)
+    {
+      if (saved_errno == EINTR)
+        return 0;
+      *error_out = strerror (saved_errno);
+      return -1;
+    }
+  return 1;
+}
 /**
  * do_handshake_poll_safe - Perform poll wait without raising exceptions
  * @socket: Socket instance
@@ -465,70 +475,13 @@ do_handshake_poll_safe (Socket_T socket,
                         int timeout_ms,
                         const char **error_out)
 {
-  SocketPoll_T poll = NULL;
   int result = 1;
-  int saved_errno;
-
   *error_out = NULL;
-
-  /* Try to create poll without exceptions - use TRY but catch and convert */
-  volatile int alloc_failed = 0;
-  TRY
-  {
-    poll = SocketPoll_new (TLS_HANDSHAKE_POLL_CAPACITY);
-  }
-  ELSE
-  {
-    alloc_failed = 1;
-  }
-  END_TRY;
-
-  if (alloc_failed || !poll)
-    {
-      *error_out = "Failed to create temporary poll instance";
-      return -1;
-    }
-
-  /* Try to add socket to poll */
-  volatile int add_failed = 0;
-  TRY
-  {
-    SocketPoll_add (poll, socket, events, NULL);
-  }
-  ELSE
-  {
-    add_failed = 1;
-  }
-  END_TRY;
-
-  if (add_failed)
-    {
-      SocketPoll_free (&poll);
-      *error_out = "Failed to add socket to poll";
-      return -1;
-    }
-
-  /* Perform poll wait */
-  SocketEvent_T evs[TLS_HANDSHAKE_POLL_CAPACITY];
-  SocketEvent_T *events_out = evs;
-  int rc = SocketPoll_wait (poll, &events_out, timeout_ms);
-  saved_errno = errno;
-
-  /* Clean up poll before returning */
-  SocketPoll_free (&poll);
-
-  if (rc < 0)
-    {
-      if (saved_errno == EINTR)
-        return 0; /* Caller should retry */
-      *error_out = strerror (saved_errno);
-      return -1;
-    }
-
-  /* rc >= 0: success (0=timeout, >0=ready) */
-  return result;
+  SocketPoll_T poll = poll_create_and_add (events, socket, error_out);
+  if (!poll)
+    return -1;
+  return poll_wait_and_free (poll, timeout_ms, error_out);
 }
-
 /**
  * do_handshake_poll - Perform poll wait for handshake I/O using SocketPoll
  * @socket: Socket instance
@@ -547,17 +500,14 @@ do_handshake_poll (Socket_T socket, unsigned events, int timeout_ms)
 {
   const char *error_msg = NULL;
   int result = do_handshake_poll_safe (socket, events, timeout_ms, &error_msg);
-
   if (result < 0)
     {
       TLS_ERROR_FMT ("SocketPoll failed: %s",
                      error_msg ? error_msg : "unknown error");
       RAISE_TLS_ERROR (SocketTLS_HandshakeFailed);
     }
-
   return result;
 }
-
 /**
  * disable_compute_shutdown_timeout - Calculate timeout for best-effort shutdown
  *
@@ -572,7 +522,6 @@ disable_compute_shutdown_timeout (void)
     timeout_ms = SOCKET_TLS_MIN_SHUTDOWN_TIMEOUT_MS;
   return timeout_ms;
 }
-
 /**
  * disable_handle_shutdown_result - Process SSL_shutdown() result for disable
  * @socket: Socket instance
@@ -593,7 +542,6 @@ disable_handle_shutdown_result (Socket_T socket,
                                 int *clean_shutdown_out)
 {
   SSL *ssl = tls_socket_get_ssl (socket);
-
   if (result == 1)
     {
       /* Clean bidirectional shutdown */
@@ -613,10 +561,8 @@ disable_handle_shutdown_result (Socket_T socket,
         }
       return 0; /* Break loop */
     }
-
   return 1; /* Continue loop (error case handled by caller) */
 }
-
 /**
  * disable_handle_io_wait - Handle I/O wait for SSL_shutdown retry
  * @socket: Socket instance
@@ -634,14 +580,12 @@ static int
 disable_handle_io_wait (Socket_T socket, SSL *ssl, int result, int64_t deadline)
 {
   int err = SSL_get_error (ssl, result);
-
   if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
     {
       /* Brief poll then retry */
       unsigned events = (err == SSL_ERROR_WANT_READ) ? POLL_READ : POLL_WRITE;
       int poll_timeout = SocketTimeout_poll_timeout (
           SOCKET_TLS_SHUTDOWN_POLL_INTERVAL_MS, deadline);
-
       if (poll_timeout > 0)
         {
           /* Simple poll - ignore errors, best-effort */
@@ -649,11 +593,9 @@ disable_handle_io_wait (Socket_T socket, SSL *ssl, int result, int64_t deadline)
           return 1; /* Continue retry */
         }
     }
-
   /* Other error or timeout - accept incomplete shutdown */
   return 0;
 }
-
 /**
  * disable_perform_shutdown_loop - Attempt SSL shutdown with retry loop
  * @socket: Socket instance
@@ -674,35 +616,27 @@ disable_perform_shutdown_loop (Socket_T socket, SSL *ssl, int timeout_ms)
 {
   int clean_shutdown = 0;
   int64_t deadline = SocketTimeout_deadline_ms (timeout_ms);
-
   while (!SocketTimeout_expired (deadline))
     {
       int result = SSL_shutdown (ssl);
-
       /* Handle successful or partial shutdown */
       if (!disable_handle_shutdown_result (socket, result, &clean_shutdown))
         break;
-
       /* result < 0: check if we need to wait for I/O */
       if (!disable_handle_io_wait (socket, ssl, result, deadline))
         break;
     }
-
   return clean_shutdown;
 }
-
 int
 SocketTLS_disable (Socket_T socket)
 {
   if (!socket)
     RAISE_TLS_ERROR_MSG (SocketTLS_Failed, "Socket cannot be NULL");
-
   /* Check if TLS is even enabled - no-op if not */
   if (!socket->tls_enabled)
     return 0;
-
   int clean_shutdown = 0;
-
   /* Check if already shutdown */
   if (socket->tls_shutdown_done)
     {
@@ -719,14 +653,11 @@ SocketTLS_disable (Socket_T socket)
               = disable_perform_shutdown_loop (socket, ssl, timeout_ms);
         }
     }
-
   /* Always clean up TLS resources regardless of shutdown result */
   free_tls_resources (socket);
-
   /* Socket is now in plain mode - return status */
   return clean_shutdown ? 1 : 0;
 }
-
 /**
  * validate_handshake_preconditions - Check socket is ready for handshake loop
  * @socket: Socket to validate
@@ -738,12 +669,10 @@ static void
 validate_handshake_preconditions (Socket_T socket)
 {
   REQUIRE_TLS_ENABLED (socket, SocketTLS_HandshakeFailed);
-
   int fd = SocketBase_fd (socket->base);
   if (fd < 0)
     RAISE_TLS_ERROR_MSG (SocketTLS_HandshakeFailed, "Invalid socket fd");
 }
-
 /**
  * handshake_record_duration - Record handshake timing metrics
  * @start_time_ms: Start time in milliseconds (0 to skip recording)
@@ -762,7 +691,6 @@ handshake_record_duration (int64_t start_time_ms)
                                        (double)elapsed_ms);
     }
 }
-
 /**
  * handshake_check_timeout - Check for timeout and raise exception if expired
  * @deadline: Deadline timestamp (0 if no timeout)
@@ -779,11 +707,9 @@ handshake_check_timeout (int64_t deadline,
 {
   if (!SocketTimeout_expired (deadline))
     return;
-
   int64_t elapsed_ms = (start_time_ms > 0)
                            ? SocketTimeout_elapsed_ms (start_time_ms)
                            : (int64_t)timeout_ms;
-
   SocketMetrics_counter_inc (SOCKET_CTR_TLS_HANDSHAKES_TOTAL);
   SocketMetrics_counter_inc (SOCKET_CTR_TLS_HANDSHAKES_FAILED);
   tls_format_openssl_error ("TLS handshake timeout");
@@ -792,7 +718,6 @@ handshake_check_timeout (int64_t deadline,
                        (long long)elapsed_ms,
                        timeout_ms);
 }
-
 /**
  * handshake_wait_for_io - Wait for I/O readiness during handshake
  * @socket: Socket instance
@@ -814,11 +739,9 @@ handshake_wait_for_io (Socket_T socket,
 {
   unsigned events = state_to_poll_events (state);
   int poll_timeout = SocketTimeout_poll_timeout (poll_interval_ms, deadline);
-
   const char *error_msg = NULL;
   int poll_result
       = do_handshake_poll_safe (socket, events, poll_timeout, &error_msg);
-
   if (poll_result < 0)
     {
       SocketMetrics_counter_inc (SOCKET_CTR_TLS_HANDSHAKES_TOTAL);
@@ -827,10 +750,54 @@ handshake_wait_for_io (Socket_T socket,
                      error_msg ? error_msg : "unknown");
       RAISE_TLS_ERROR (SocketTLS_HandshakeFailed);
     }
-
   return poll_result;
 }
-
+/**
+ * handshake_attempt - Perform single handshake attempt
+ * @socket: Socket
+ *
+ * Returns: TLSHandshakeState
+ */
+static TLSHandshakeState
+handshake_attempt (Socket_T socket)
+{
+  return SocketTLS_handshake (socket);
+}
+/**
+ * handle_handshake_state - Handle handshake state
+ * @state: State from attempt
+ * @timeout_ms: Timeout
+ * @deadline: Deadline
+ * @start_time_ms: Start time
+ * @final_state: Output final state
+ *
+ * Returns: 1 to continue, 0 to stop
+ */
+static int
+handle_handshake_state (TLSHandshakeState state,
+                        int timeout_ms,
+                        volatile int64_t deadline,
+                        int64_t start_time_ms,
+                        volatile TLSHandshakeState *final_state)
+{
+  if (state == TLS_HANDSHAKE_COMPLETE)
+    {
+      *final_state = state;
+      return 0;
+    }
+  if (state == TLS_HANDSHAKE_ERROR)
+    {
+      *final_state = state;
+      return 0;
+    }
+  if (timeout_ms == 0)
+    {
+      *final_state = state;
+      return 0;
+    }
+  handshake_check_timeout (deadline, timeout_ms, start_time_ms);
+  return 1;
+}
 /**
  * handshake_loop_internal - Internal handshake loop with configurable poll
  * interval
@@ -855,45 +822,18 @@ handshake_loop_internal (Socket_T socket,
 {
   volatile int64_t deadline
       = (timeout_ms > 0) ? SocketTimeout_deadline_ms (timeout_ms) : 0LL;
-
   volatile TLSHandshakeState final_state = TLS_HANDSHAKE_ERROR;
-
   /* Single TRY block at top level - exceptions from handshake are caught */
   TRY
   {
     while (1)
       {
-        TLSHandshakeState state = SocketTLS_handshake (socket);
-
-        if (state == TLS_HANDSHAKE_COMPLETE)
-          {
-            handshake_record_duration (start_time_ms);
-            final_state = state;
-            break; /* Success - exit loop */
-          }
-
-        if (state == TLS_HANDSHAKE_ERROR)
-          {
-            final_state = state;
-            break; /* Error already handled by SocketTLS_handshake */
-          }
-
-        /* Non-blocking mode: return current state immediately */
-        if (timeout_ms == 0)
-          {
-            final_state = state;
-            break;
-          }
-
-        /* Check timeout and raise if expired */
-        handshake_check_timeout (deadline, timeout_ms, start_time_ms);
-
+        TLSHandshakeState state = handshake_attempt (socket);
+        if (!handle_handshake_state (state, timeout_ms, deadline, start_time_ms, &final_state))
+          break;
         /* Wait for I/O - raises on error, returns 0/1 on success */
         int poll_result
             = handshake_wait_for_io (socket, state, poll_interval_ms, deadline);
-
-        /* poll_result == 0: EINTR or partial timeout, continue loop */
-        /* poll_result == 1: socket ready, retry handshake */
         (void)poll_result;
       }
   }
@@ -903,61 +843,83 @@ handshake_loop_internal (Socket_T socket,
     final_state = TLS_HANDSHAKE_ERROR;
   }
   END_TRY;
-
+  if (final_state == TLS_HANDSHAKE_COMPLETE)
+    handshake_record_duration (start_time_ms);
   return final_state;
 }
-
 TLSHandshakeState
 SocketTLS_handshake_loop (Socket_T socket, int timeout_ms)
 {
   assert (socket);
-
   if (socket->tls_handshake_done)
     return TLS_HANDSHAKE_COMPLETE;
-
   validate_handshake_preconditions (socket);
-
   int64_t start_time_ms = Socket_get_monotonic_ms ();
   return handshake_loop_internal (
       socket, timeout_ms, SOCKET_TLS_POLL_INTERVAL_MS, start_time_ms);
 }
-
 TLSHandshakeState
 SocketTLS_handshake_loop_ex (Socket_T socket,
                              int timeout_ms,
                              int poll_interval_ms)
 {
   assert (socket);
-
   if (socket->tls_handshake_done)
     return TLS_HANDSHAKE_COMPLETE;
-
   validate_handshake_preconditions (socket);
-
   /* Validate poll interval - use default if invalid */
   if (poll_interval_ms <= 0)
     poll_interval_ms = SOCKET_TLS_POLL_INTERVAL_MS;
-
   int64_t start_time_ms = Socket_get_monotonic_ms ();
   return handshake_loop_internal (
       socket, timeout_ms, poll_interval_ms, start_time_ms);
 }
-
 TLSHandshakeState
 SocketTLS_handshake_auto (Socket_T socket)
 {
   int timeout_ms;
-
   assert (socket);
-
   /* Use socket's operation timeout, falling back to TLS default */
   timeout_ms = socket->base->timeouts.operation_timeout_ms;
   if (timeout_ms <= 0)
     timeout_ms = SOCKET_TLS_DEFAULT_HANDSHAKE_TIMEOUT_MS;
-
   return SocketTLS_handshake_loop (socket, timeout_ms);
 }
-
+/**
+ * shutdown_handle_want_read_write - Handle WANT_READ/WRITE errors
+ * @ssl_error: SSL error code
+ * @want_events_out: Output events
+ *
+ * Returns: 1 to continue
+ */
+static int
+shutdown_handle_want_read_write (int ssl_error, unsigned *want_events_out)
+{
+  if (ssl_error == SSL_ERROR_WANT_READ)
+    *want_events_out = POLL_READ;
+  else
+    *want_events_out = POLL_WRITE;
+  errno = EAGAIN;
+  return 1;
+}
+/**
+ * shutdown_handle_syscall - Handle SYSCALL errors
+ * @want_events_out: Output events
+ *
+ * Returns: 1 to continue, 0 to stop
+ */
+static int
+shutdown_handle_syscall (unsigned *want_events_out)
+{
+  if (errno == EAGAIN || errno == EWOULDBLOCK)
+    {
+      *want_events_out = POLL_READ | POLL_WRITE;
+      return 1;
+    }
+  if (errno == 0)
+    errno = ECONNRESET;
+  return 0;
+}
 /**
  * shutdown_handle_ssl_error - Handle SSL_shutdown errors in non-blocking mode
  * @socket: Socket instance
@@ -978,49 +940,23 @@ shutdown_handle_ssl_error (Socket_T socket,
                            unsigned *want_events_out)
 {
   int ssl_error = SSL_get_error (ssl, result);
-
   *want_events_out = 0;
-
   switch (ssl_error)
     {
     case SSL_ERROR_WANT_READ:
-      *want_events_out = POLL_READ;
-      errno = EAGAIN;
-      return 1; /* Continue polling */
-
     case SSL_ERROR_WANT_WRITE:
-      *want_events_out = POLL_WRITE;
-      errno = EAGAIN;
-      return 1; /* Continue polling */
-
+      return shutdown_handle_want_read_write (ssl_error, want_events_out);
     case SSL_ERROR_SYSCALL:
-      /* System call error during shutdown.
-       * If errno is EAGAIN/EWOULDBLOCK, the operation just needs to be
-       * retried. If errno is 0 with result 0, peer closed unexpectedly. Other
-       * errors (ECONNRESET, EPIPE, etc.) indicate connection lost - not fatal
-       * for shutdown since we're closing anyway. */
-      if (errno == EAGAIN || errno == EWOULDBLOCK)
-        {
-          *want_events_out = POLL_READ | POLL_WRITE;
-          return 1; /* Continue polling */
-        }
-      if (errno == 0)
-        errno = ECONNRESET;
-      /* Connection lost during shutdown - mark as done (partial) */
-      socket->tls_shutdown_done = 0; /* Partial/failed shutdown */
-      return 0;                      /* Stop, but don't raise exception */
-
+      return shutdown_handle_syscall (want_events_out);
     case SSL_ERROR_ZERO_RETURN:
       /* Peer already sent close_notify - we're done */
       socket->tls_shutdown_done = 1;
       return 0; /* Complete - stop looping */
-
     case SSL_ERROR_SSL:
       /* Protocol error - this is a real failure */
       errno = EPROTO;
       tls_format_openssl_error ("TLS shutdown protocol error");
       return -1; /* Fatal error */
-
     default:
       /* Unknown error */
       errno = EIO;
@@ -1028,7 +964,6 @@ shutdown_handle_ssl_error (Socket_T socket,
       return -1; /* Fatal error */
     }
 }
-
 /**
  * shutdown_handle_result - Process SSL_shutdown return value
  * @socket: Socket instance
@@ -1080,7 +1015,6 @@ shutdown_handle_result (Socket_T socket, SSL *ssl, int result)
       return 1;
     }
 }
-
 /**
  * shutdown_wait_for_io - Wait for I/O readiness during shutdown
  * @socket: Socket instance
@@ -1104,7 +1038,6 @@ shutdown_wait_for_io (Socket_T socket, int64_t deadline)
     return 1; /* EINTR or timeout slice, check deadline again */
   return 1;
 }
-
 /**
  * shutdown_finalize - Finalize shutdown on timeout
  * @socket: Socket instance
@@ -1126,36 +1059,28 @@ shutdown_finalize (Socket_T socket, int timeout_ms)
       /* Try one more non-blocking SSL_shutdown to send close_notify */
       (void)SSL_shutdown (ssl);
     }
-
   /* Mark as partial shutdown and clean up without raising exception for
    * timeout. Timeout during shutdown is not critical - we sent our
    * close_notify (or tried to), and the socket will be closed anyway. */
   socket->tls_shutdown_done = 0; /* Partial shutdown */
   free_tls_resources (socket);
-
   /* For strict mode, raise exception on timeout. Most applications don't need
    * this level of strictness since the connection is being closed anyway. */
   TLS_ERROR_FMT ("TLS shutdown timeout after %d ms", timeout_ms);
   RAISE_TLS_ERROR (SocketTLS_ShutdownFailed);
 }
-
 void
 SocketTLS_shutdown (Socket_T socket)
 {
   assert (socket);
-
   REQUIRE_TLS_ENABLED (socket, SocketTLS_ShutdownFailed);
-
   if (socket->tls_shutdown_done)
     return;
-
   /* Use socket operation timeout or default shutdown timeout */
   int timeout_ms = socket->base->timeouts.operation_timeout_ms;
   if (timeout_ms <= 0)
     timeout_ms = SOCKET_TLS_DEFAULT_SHUTDOWN_TIMEOUT_MS;
-
   int64_t deadline = SocketTimeout_deadline_ms (timeout_ms);
-
   while (!SocketTimeout_expired (deadline))
     {
       SSL *ssl = tls_socket_get_ssl (socket);
@@ -1166,20 +1091,70 @@ SocketTLS_shutdown (Socket_T socket)
           RAISE_TLS_ERROR_MSG (SocketTLS_ShutdownFailed,
                                "SSL object lost during shutdown");
         }
-
       int result = SSL_shutdown (ssl);
       int cont = shutdown_handle_result (socket, ssl, result);
       if (cont == 0)
         return; /* Shutdown complete */
-
       /* Need I/O for remaining shutdown steps */
       if (!shutdown_wait_for_io (socket, deadline))
         break; /* Timeout expired */
     }
-
   shutdown_finalize (socket, timeout_ms);
 }
-
+/**
+ * shutdown_send_validate - Validate for shutdown send
+ * @socket: Socket
+ * @ssl: SSL out
+ *
+ * Returns: 1 if valid, -1 if not
+ */
+static int
+shutdown_send_validate (Socket_T socket, SSL **ssl)
+{
+  if (!socket->tls_enabled)
+    return -1;
+  if (socket->tls_shutdown_done)
+    return 1;
+  *ssl = tls_socket_get_ssl (socket);
+  if (!*ssl)
+    return -1;
+  return 0;
+}
+/**
+ * shutdown_send_handle_result - Handle SSL_shutdown result
+ * @socket: Socket
+ * @result: Result
+ * @ssl_error: Error code
+ *
+ * Returns: 1 success, 0 would block, raises on error
+ */
+static int
+shutdown_send_handle_result (Socket_T socket, int result, int ssl_error)
+{
+  socket->tls_shutdown_done = 1;
+  if (result >= 0)
+    return 1;
+  switch (ssl_error)
+    {
+    case SSL_ERROR_WANT_READ:
+    case SSL_ERROR_WANT_WRITE:
+      errno = EAGAIN;
+      socket->tls_shutdown_done = 0;
+      return 0;
+    case SSL_ERROR_SYSCALL:
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
+        {
+          socket->tls_shutdown_done = 0;
+          return 0;
+        }
+      return 1;
+    case SSL_ERROR_SSL:
+      tls_format_openssl_error ("TLS shutdown_send protocol error");
+      RAISE_TLS_ERROR (SocketTLS_ShutdownFailed);
+    default:
+      return 1;
+    }
+}
 /**
  * SocketTLS_shutdown_send - Send close_notify without waiting for peer
  * response
@@ -1197,8 +1172,8 @@ SocketTLS_shutdown (Socket_T socket)
  * errno=EAGAIN, and the caller should poll for POLL_WRITE and retry.
  *
  * Returns: 1 on success (close_notify sent),
- *          0 if would block (errno=EAGAIN) - retry after poll,
- *          -1 if TLS not enabled or already shutdown
+ * 0 if would block (errno=EAGAIN) - retry after poll,
+ * -1 if TLS not enabled or already shutdown
  *
  * Raises: SocketTLS_ShutdownFailed on protocol error
  * Thread-safe: No
@@ -1209,8 +1184,8 @@ SocketTLS_shutdown (Socket_T socket)
  * // Quick shutdown - don't wait for peer
  * int ret = SocketTLS_shutdown_send(sock);
  * if (ret == 0 && errno == EAGAIN) {
- *     // For non-blocking, poll and retry if needed
- *     // Or just proceed to close - best effort
+ * // For non-blocking, poll and retry if needed
+ * // Or just proceed to close - best effort
  * }
  * Socket_close(sock);
  * @endcode
@@ -1221,156 +1196,16 @@ int
 SocketTLS_shutdown_send (Socket_T socket)
 {
   assert (socket);
-
-  if (!socket->tls_enabled)
-    return -1;
-
-  if (socket->tls_shutdown_done)
-    return 1; /* Already done */
-
-  SSL *ssl = tls_socket_get_ssl (socket);
-  if (!ssl)
-    return -1;
-
+  SSL *ssl = NULL;
+  int val = shutdown_send_validate (socket, &ssl);
+  if (val != 0)
+    return val;
   /* Set quiet shutdown mode to skip waiting for peer's close_notify */
   SSL_set_quiet_shutdown (ssl, 1);
-
   int result = SSL_shutdown (ssl);
-
-  if (result >= 0)
-    {
-      /* result == 0: close_notify sent (unidirectional shutdown complete)
-       * result == 1: full shutdown (shouldn't happen with quiet mode, but ok)
-       */
-      socket->tls_shutdown_done = 1;
-      return 1;
-    }
-
-  /* result < 0: check error */
   int ssl_error = SSL_get_error (ssl, result);
-
-  switch (ssl_error)
-    {
-    case SSL_ERROR_WANT_READ:
-    case SSL_ERROR_WANT_WRITE:
-      errno = EAGAIN;
-      return 0; /* Would block - caller should retry */
-
-    case SSL_ERROR_SYSCALL:
-      if (errno == EAGAIN || errno == EWOULDBLOCK)
-        return 0; /* Would block */
-      /* Connection error - treat as partial success (we tried) */
-      socket->tls_shutdown_done = 0;
-      return 1;
-
-    case SSL_ERROR_SSL:
-      /* Protocol error */
-      tls_format_openssl_error ("TLS shutdown_send protocol error");
-      RAISE_TLS_ERROR (SocketTLS_ShutdownFailed);
-      __builtin_unreachable (); /* RAISE never returns */
-
-    default:
-      /* Unknown or zero return - treat as success */
-      socket->tls_shutdown_done = 1;
-      return 1;
-    }
+  return shutdown_send_handle_result (socket, result, ssl_error);
 }
-
-/**
- * SocketTLS_send - Send data over a TLS-encrypted connection
- * @socket: Socket with completed TLS handshake
- * @buf: Buffer containing data to send
- * @len: Number of bytes to send
- *
- * Sends data using SSL_write() with proper partial write handling when
- * SSL_MODE_ENABLE_PARTIAL_WRITE is enabled. For non-blocking sockets,
- * returns 0 with errno=EAGAIN when the operation would block.
- *
- * ## Partial Write Handling
- *
- * With SSL_MODE_ENABLE_PARTIAL_WRITE (enabled by default), SSL_write() may
- * return a value less than len. The caller should retry with the remaining
- * data. This differs from blocking mode where SSL_write() waits until all
- * bytes are sent or an error occurs.
- *
- * ## Zero-Length Operations
- *
- * Sending zero bytes returns 0 immediately without invoking SSL_write().
- * This prevents undefined behavior in OpenSSL and provides consistent
- * semantics with POSIX send().
- *
- * ## Large Buffer Handling
- *
- * Buffers larger than INT_MAX are capped to INT_MAX per call since OpenSSL
- * uses int for lengths. Caller should loop to send all data if needed.
- *
- * Returns: Number of bytes sent (may be < len with partial writes),
- *          0 if would block (errno=EAGAIN)
- * Raises: SocketTLS_Failed on TLS error
- * Thread-safe: No - operates on per-connection SSL state
- */
-ssize_t
-SocketTLS_send (Socket_T socket, const void *buf, size_t len)
-{
-  assert (socket);
-  assert (buf || len == 0);
-
-  /* Handle zero-length send: return 0 immediately (POSIX semantics) */
-  if (len == 0)
-    return 0;
-
-  SSL *ssl = VALIDATE_TLS_IO_READY (socket, SocketTLS_Failed);
-
-  /* Cap length to INT_MAX to prevent truncation on 64-bit systems.
-   * SSL_write uses int for length, so we must stay within INT_MAX. */
-  int write_len = (len > (size_t)INT_MAX) ? INT_MAX : (int)len;
-  int result = SSL_write (ssl, buf, write_len);
-
-  if (result > 0)
-    {
-      /* Partial write success: SSL_MODE_ENABLE_PARTIAL_WRITE allows
-       * result < write_len. Caller should loop for remaining data. */
-      return (ssize_t)result;
-    }
-
-  ssize_t handled = tls_handle_ssl_write_result (ssl, result, "TLS send");
-  if (handled < -1)
-    {
-      RAISE (Socket_Closed);
-    }
-  else if (handled < 0)
-    {
-      RAISE_TLS_ERROR (SocketTLS_Failed);
-    }
-  return handled;
-
-  /* Unreachable - all cases either return or raise */
-  return -1;
-}
-
-/**
- * handle_ssl_read_error - Handle SSL_read error conditions
- * @ssl: SSL connection object
- * @result: Raw result from SSL_read
- * @ssl_error: Error code from SSL_get_error
- *
- * Processes SSL_read error conditions and takes appropriate action.
- * Returns 0 for EAGAIN (caller should retry), or raises exceptions
- * for fatal errors and connection close events.
- *
- * Error handling:
- * - SSL_ERROR_ZERO_RETURN: Clean shutdown (raises Socket_Closed)
- * - SSL_ERROR_WANT_READ/WRITE: Non-blocking would-block (returns 0,
- * errno=EAGAIN)
- * - SSL_ERROR_SYSCALL: System error or abrupt close (raises exception)
- * - SSL_ERROR_SSL: Protocol error (raises SocketTLS_Failed)
- * - Default: Unknown error (raises SocketTLS_Failed)
- *
- * Returns: 0 for would-block (EAGAIN)
- * Raises: Socket_Closed on clean/abrupt shutdown,
- *         SocketTLS_Failed on protocol or syscall errors
- * Thread-safe: Yes - operates on per-connection SSL state
- */
 /**
  * handle_ssl_read_syscall_error - Handle SSL_ERROR_SYSCALL during read
  * @result: Return value from SSL_read
@@ -1394,43 +1229,92 @@ handle_ssl_read_syscall_error (int result)
   RAISE_TLS_ERROR (SocketTLS_Failed);
   __builtin_unreachable ();
 }
-
+/**
+ * handle_ssl_read_zero_return - Handle SSL_ERROR_ZERO_RETURN
+ */
+static void
+handle_ssl_read_zero_return (void)
+{
+  errno = 0;
+  RAISE (Socket_Closed);
+  __builtin_unreachable ();
+}
+/**
+ * handle_ssl_read_want - Handle WANT_READ/WRITE
+ *
+ * Returns: 0
+ */
+static ssize_t
+handle_ssl_read_want (void)
+{
+  errno = EAGAIN;
+  return 0;
+}
+/**
+ * handle_ssl_read_ssl_error - Handle SSL_ERROR_SSL
+ */
+static void
+handle_ssl_read_ssl_error (void)
+{
+  errno = EPROTO;
+  tls_format_openssl_error ("TLS recv failed (protocol)");
+  RAISE_TLS_ERROR (SocketTLS_Failed);
+  __builtin_unreachable ();
+}
+/**
+ * handle_ssl_read_unknown - Handle default case
+ */
+static void
+handle_ssl_read_unknown (void)
+{
+  errno = EIO;
+  tls_format_openssl_error ("TLS recv failed (unknown)");
+  RAISE_TLS_ERROR (SocketTLS_Failed);
+  __builtin_unreachable ();
+}
+/**
+ * handle_ssl_read_error - Handle SSL_read error conditions
+ * @ssl: SSL connection object
+ * @result: Raw result from SSL_read
+ * @ssl_error: Error code from SSL_get_error
+ *
+ * Processes SSL_read error conditions and takes appropriate action.
+ * Returns 0 for EAGAIN (caller should retry), or raises exceptions
+ * for fatal errors and connection close events.
+ *
+ * Error handling:
+ * - SSL_ERROR_ZERO_RETURN: Clean shutdown (raises Socket_Closed)
+ * - SSL_ERROR_WANT_READ/WRITE: Non-blocking would-block (returns 0,
+ * errno=EAGAIN)
+ * - SSL_ERROR_SYSCALL: System error or abrupt close (raises exception)
+ * - SSL_ERROR_SSL: Protocol error (raises SocketTLS_Failed)
+ * - Default: Unknown error (raises SocketTLS_Failed)
+ *
+ * Returns: 0 for would-block (EAGAIN)
+ * Raises: Socket_Closed on clean/abrupt shutdown,
+ * SocketTLS_Failed on protocol or syscall errors
+ * Thread-safe: Yes - operates on per-connection SSL state
+ */
 static ssize_t
 handle_ssl_read_error (SSL *ssl, int result, int ssl_error)
 {
   (void)ssl; /* Unused - reserved for future use */
-
   switch (ssl_error)
     {
     case SSL_ERROR_ZERO_RETURN:
-      errno = 0;
-      RAISE (Socket_Closed);
-      __builtin_unreachable ();
-
+      handle_ssl_read_zero_return ();
     case SSL_ERROR_WANT_READ:
     case SSL_ERROR_WANT_WRITE:
-      errno = EAGAIN;
-      return 0;
-
+      return handle_ssl_read_want ();
     case SSL_ERROR_SYSCALL:
       handle_ssl_read_syscall_error (result);
-      __builtin_unreachable ();
-
     case SSL_ERROR_SSL:
-      errno = EPROTO;
-      tls_format_openssl_error ("TLS recv failed (protocol)");
-      RAISE_TLS_ERROR (SocketTLS_Failed);
-      __builtin_unreachable ();
-
+      handle_ssl_read_ssl_error ();
     default:
-      errno = EIO;
-      tls_format_openssl_error ("TLS recv failed (unknown)");
-      RAISE_TLS_ERROR (SocketTLS_Failed);
+      handle_ssl_read_unknown ();
     }
-
   return -1;
 }
-
 /**
  * SocketTLS_recv - Receive data from a TLS-encrypted connection
  * @socket: Socket with completed TLS handshake
@@ -1444,12 +1328,12 @@ handle_ssl_read_error (SSL *ssl, int result, int ssl_error)
  * ## Shutdown Handling
  *
  * - **Clean shutdown (SSL_ERROR_ZERO_RETURN)**: Peer sent close_notify alert.
- *   This raises Socket_Closed to indicate graceful connection termination.
- *   The TLS session ended properly without data loss.
+ * This raises Socket_Closed to indicate graceful connection termination.
+ * The TLS session ended properly without data loss.
  *
  * - **Abrupt close (SSL_ERROR_SYSCALL with errno=0)**: Connection reset or
- *   closed without close_notify. This also raises Socket_Closed but with
- *   errno=ECONNRESET to indicate potential data truncation.
+ * closed without close_notify. This also raises Socket_Closed but with
+ * errno=ECONNRESET to indicate potential data truncation.
  *
  * ## Non-blocking Operation
  *
@@ -1468,9 +1352,9 @@ handle_ssl_read_error (SSL *ssl, int result, int ssl_error)
  * are limited to 16KB.
  *
  * Returns: Number of bytes received (> 0 on success),
- *          0 if would block (errno=EAGAIN)
+ * 0 if would block (errno=EAGAIN)
  * Raises: Socket_Closed on clean shutdown or peer disconnect,
- *         SocketTLS_Failed on TLS protocol error
+ * SocketTLS_Failed on TLS protocol error
  * Thread-safe: No - operates on per-connection SSL state
  */
 ssize_t
@@ -1478,98 +1362,77 @@ SocketTLS_recv (Socket_T socket, void *buf, size_t len)
 {
   assert (socket);
   assert (buf || len == 0);
-
   /* Handle zero-length recv: return 0 immediately (POSIX semantics) */
   if (len == 0)
     return 0;
-
   SSL *ssl = VALIDATE_TLS_IO_READY (socket, SocketTLS_Failed);
-
   /* Cap length to INT_MAX to prevent truncation on 64-bit systems.
    * SSL_read uses int for length, so we must stay within INT_MAX. */
   int read_len = (len > (size_t)INT_MAX) ? INT_MAX : (int)len;
   int result = SSL_read (ssl, buf, read_len);
-
   if (result > 0)
     return (ssize_t)result;
-
   /* result <= 0: Must call SSL_get_error to determine the actual error.
    * Note: SSL_read returning 0 does NOT always mean clean shutdown;
    * SSL_get_error must be consulted for the definitive error code. */
   int ssl_error = SSL_get_error (ssl, result);
-
   return handle_ssl_read_error (ssl, result, ssl_error);
 }
-
 const char *
 SocketTLS_get_cipher (Socket_T socket)
 {
   assert (socket);
-
   SSL *ssl = tls_socket_get_ssl (socket);
   if (!ssl)
     return NULL;
-
   const SSL_CIPHER *cipher = SSL_get_current_cipher (ssl);
   return cipher ? SSL_CIPHER_get_name (cipher) : NULL;
 }
-
 const char *
 SocketTLS_get_version (Socket_T socket)
 {
   assert (socket);
-
   SSL *ssl = tls_socket_get_ssl (socket);
   return ssl ? SSL_get_version (ssl) : NULL;
 }
-
 int
 SocketTLS_get_protocol_version (Socket_T socket)
 {
   assert (socket);
-
   SSL *ssl = tls_socket_get_ssl (socket);
   if (!ssl)
     return 0;
-
   /* SSL_version() returns the protocol version:
    * TLS1_VERSION (0x0301), TLS1_1_VERSION (0x0302),
    * TLS1_2_VERSION (0x0303), TLS1_3_VERSION (0x0304) */
   return SSL_version (ssl);
 }
-
 long
 SocketTLS_get_verify_result (Socket_T socket)
 {
   SSL *ssl;
-
   if (!socket || !socket->tls_enabled || !socket->tls_ssl
       || !socket->tls_handshake_done)
     {
       return X509_V_ERR_INVALID_CALL;
     }
-
   ssl = (SSL *)socket->tls_ssl;
   return SSL_get_verify_result (ssl);
 }
-
 const char *
 SocketTLS_get_verify_error_string (Socket_T socket, char *buf, size_t size)
 {
   if (!socket || !buf || size == 0)
     return NULL;
-
   long code = SocketTLS_get_verify_result (socket);
   if (code == X509_V_OK)
     return NULL;
-
   const char *code_str = X509_verify_cert_error_string (code);
   if (code_str)
     {
       (void)socket_util_safe_strncpy (buf, code_str, size);
       return buf;
     }
-
   unsigned long err = ERR_get_error ();
   if (err)
     {
@@ -1577,59 +1440,65 @@ SocketTLS_get_verify_error_string (Socket_T socket, char *buf, size_t size)
       ERR_clear_error (); /* Clear the error queue after reading */
       return buf;
     }
-
   (void)socket_util_safe_strncpy (
       buf, "TLS verification failed (unknown error)", size);
   return buf;
 }
-
 int
 SocketTLS_is_session_reused (Socket_T socket)
 {
   assert (socket);
-
   /* Validate preconditions */
   if (!socket->tls_enabled)
     return -1;
-
   if (!socket->tls_handshake_done)
     return -1; /* Must complete handshake first */
-
   SSL *ssl = tls_socket_get_ssl (socket);
   if (!ssl)
     return -1;
-
   /* SSL_session_reused() returns 1 if a session was reused, 0 otherwise.
    * For TLS 1.3, this indicates PSK resumption was used. */
   return SSL_session_reused (ssl) ? 1 : 0;
 }
-
 const char *
 SocketTLS_get_alpn_selected (Socket_T socket)
 {
   assert (socket);
-
   SSL *ssl = tls_socket_get_ssl (socket);
   if (!ssl)
     return NULL;
-
   const unsigned char *alpn_data;
   unsigned int alpn_len;
   SSL_get0_alpn_selected (ssl, &alpn_data, &alpn_len);
-
   if (!alpn_data || alpn_len == 0 || alpn_len > SOCKET_TLS_MAX_ALPN_LEN)
     return NULL;
-
   char *proto_copy = Arena_alloc (
       SocketBase_arena (socket->base), alpn_len + 1, __FILE__, __LINE__);
   if (!proto_copy)
     return NULL;
-
   memcpy (proto_copy, alpn_data, alpn_len);
   proto_copy[alpn_len] = '\0';
   return proto_copy;
 }
-
+/**
+ * session_save_validate - Validate for session save
+ * @socket: Socket
+ * @ssl: SSL out
+ *
+ * Returns: SSL_SESSION* or NULL
+ */
+static SSL_SESSION *
+session_save_validate (Socket_T socket, SSL **ssl)
+{
+  if (!socket->tls_enabled)
+    return NULL;
+  if (!socket->tls_handshake_done)
+    return NULL;
+  *ssl = tls_socket_get_ssl (socket);
+  if (!*ssl)
+    return NULL;
+  return session_get_if_valid (*ssl);
+}
 /**
  * SocketTLS_session_save - Export TLS session for later resumption
  * @socket: Socket with completed TLS handshake
@@ -1646,14 +1515,14 @@ SocketTLS_get_alpn_selected (Socket_T socket)
  * messages AFTER the handshake completes. Key points:
  *
  * 1. **Timing**: For TLS 1.3, this function may return -1 if called
- *    immediately after handshake. Session tickets are typically sent by the
- *    server shortly after handshake. Wait for I/O activity or use a callback.
+ * immediately after handshake. Session tickets are typically sent by the
+ * server shortly after handshake. Wait for I/O activity or use a callback.
  *
  * 2. **Multiple tickets**: TLS 1.3 servers may send multiple session tickets.
- *    Only the most recent is captured by SSL_get1_session().
+ * Only the most recent is captured by SSL_get1_session().
  *
  * 3. **Ticket lifetime**: TLS 1.3 sessions have limited validity set by the
- *    server. Check the session's lifetime before storage.
+ * server. Check the session's lifetime before storage.
  *
  * ## Buffer Sizing
  *
@@ -1662,8 +1531,8 @@ SocketTLS_get_alpn_selected (Socket_T socket)
  * - If buffer is NULL, returns 0 and sets *len to required size
  *
  * Returns: 1 on success (session saved),
- *          0 if buffer too small (len updated with required size),
- *          -1 on error (no session, TLS not enabled, handshake incomplete)
+ * 0 if buffer too small (len updated with required size),
+ * -1 on error (no session, TLS not enabled, handshake incomplete)
  *
  * Thread-safe: No
  *
@@ -1683,20 +1552,16 @@ session_get_if_valid (SSL *ssl)
   SSL_SESSION *session = SSL_get1_session (ssl);
   if (!session)
     return NULL;
-
   time_t session_timeout = SSL_SESSION_get_timeout (session);
   time_t session_time = SSL_SESSION_get_time (session);
   time_t now = time (NULL);
-
   if (session_time + session_timeout < now)
     {
       SSL_SESSION_free (session);
       return NULL;
     }
-
   return session;
 }
-
 /**
  * session_serialize - Serialize SSL session into buffer
  * @session: Valid SSL session (freed by this function)
@@ -1714,48 +1579,76 @@ session_serialize (SSL_SESSION *session, unsigned char *buffer, size_t *len)
       SSL_SESSION_free (session);
       return -1;
     }
-
   if (buffer == NULL || (size_t)session_len > *len)
     {
       *len = (size_t)session_len;
       SSL_SESSION_free (session);
       return 0;
     }
-
   unsigned char *p = buffer;
   int written = i2d_SSL_SESSION (session, &p);
   SSL_SESSION_free (session);
-
   if (written <= 0)
     return -1;
-
   *len = (size_t)written;
   return 1;
 }
-
 int
 SocketTLS_session_save (Socket_T socket, unsigned char *buffer, size_t *len)
 {
   assert (socket);
   assert (len);
-
-  if (!socket->tls_enabled)
-    return -1;
-
-  if (!socket->tls_handshake_done)
-    return -1;
-
-  SSL *ssl = tls_socket_get_ssl (socket);
-  if (!ssl)
-    return -1;
-
-  SSL_SESSION *session = session_get_if_valid (ssl);
+  SSL *ssl = NULL;
+  SSL_SESSION *session = session_save_validate (socket, &ssl);
   if (!session)
     return -1;
-
   return session_serialize (session, buffer, len);
 }
-
+/**
+ * session_restore_validate - Validate for session restore
+ * @socket: Socket
+ * @ssl: SSL out
+ *
+ * Returns: 1 if valid, -1 if not
+ */
+static int
+session_restore_validate (Socket_T socket, SSL **ssl)
+{
+  if (!socket->tls_enabled)
+    return -1;
+  if (socket->tls_handshake_done)
+    return -1;
+  *ssl = tls_socket_get_ssl (socket);
+  if (!*ssl)
+    return -1;
+  return 0;
+}
+/**
+ * session_deserialize_and_check - Deserialize and check session
+ * @buffer: Buffer
+ * @len: Length
+ *
+ * Returns: SSL_SESSION* or NULL
+ */
+static SSL_SESSION *
+session_deserialize_and_check (const unsigned char *buffer, size_t len)
+{
+  if (len == 0 || len > (size_t)LONG_MAX)
+    return NULL;
+  const unsigned char *p = buffer;
+  SSL_SESSION *session = d2i_SSL_SESSION (NULL, &p, (long)len);
+  if (!session)
+    return NULL;
+  time_t session_timeout = SSL_SESSION_get_timeout (session);
+  time_t session_time = SSL_SESSION_get_time (session);
+  time_t now = time (NULL);
+  if (session_time + session_timeout < now)
+    {
+      SSL_SESSION_free (session);
+      return NULL;
+    }
+  return session;
+}
 /**
  * SocketTLS_session_restore - Import saved TLS session for resumption
  * @socket: Socket with TLS enabled but BEFORE handshake
@@ -1785,8 +1678,8 @@ SocketTLS_session_save (Socket_T socket, unsigned char *buffer, size_t *len)
  * occurred.
  *
  * Returns: 1 on success (session set for resumption),
- *          0 on invalid/expired session data (will do full handshake),
- *          -1 on error (TLS not enabled, handshake already done)
+ * 0 on invalid/expired session data (will do full handshake),
+ * -1 on error (TLS not enabled, handshake already done)
  *
  * Thread-safe: No
  *
@@ -1799,66 +1692,18 @@ SocketTLS_session_restore (Socket_T socket,
 {
   assert (socket);
   assert (buffer);
-
-  /* Validate preconditions */
-  if (!socket->tls_enabled)
+  SSL *ssl = NULL;
+  if (session_restore_validate (socket, &ssl) != 0)
     return -1;
-
-  /* Must be called BEFORE handshake - check state */
-  if (socket->tls_handshake_done)
-    {
-      /* Already handshaked - too late to restore session.
-       * This is a programming error, but we return gracefully. */
-      return -1;
-    }
-
-  SSL *ssl = tls_socket_get_ssl (socket);
-  if (!ssl)
-    return -1;
-
-  /* Validate length to prevent integer overflow in d2i_SSL_SESSION */
-  if (len == 0 || len > (size_t)LONG_MAX)
-    return 0; /* Invalid data */
-
-  /* Deserialize session from DER format */
-  const unsigned char *p = buffer;
-  SSL_SESSION *session = d2i_SSL_SESSION (NULL, &p, (long)len);
+  SSL_SESSION *session = session_deserialize_and_check (buffer, len);
   if (!session)
-    {
-      /* Invalid or corrupted session data.
-       * This is not an error - handshake will proceed without resumption. */
-      return 0;
-    }
-
-  /* Check if session has expired */
-  time_t session_timeout = SSL_SESSION_get_timeout (session);
-  time_t session_time = SSL_SESSION_get_time (session);
-  time_t now = time (NULL);
-
-  if (session_time + session_timeout < now)
-    {
-      /* Session expired - free and return gracefully.
-       * Handshake will proceed with full negotiation. */
-      SSL_SESSION_free (session);
-      return 0;
-    }
-
-  /* Set session for resumption attempt.
-   * SSL_set_session() does NOT take ownership - it copies/refs the session.
-   * We still need to free our reference. */
+    return 0;
   int ret = SSL_set_session (ssl, session);
   SSL_SESSION_free (session);
-
   if (!ret)
-    {
-      /* OpenSSL rejected the session - rare but possible.
-       * Handshake will proceed with full negotiation. */
-      return 0;
-    }
-
-  return 1; /* Session set successfully - resumption will be attempted */
+    return 0;
+  return 1;
 }
-
 /**
  * SocketTLS_is_session_reused - Check if session resumption occurred
  * @socket: Socket with completed TLS handshake
@@ -1874,15 +1719,13 @@ SocketTLS_session_restore (Socket_T socket,
  * - 0-RTT early data (if enabled) is a separate feature
  *
  * Returns: 1 if session was reused (abbreviated handshake),
- *          0 if full handshake was performed,
- *          -1 if TLS not enabled or handshake not complete
+ * 0 if full handshake was performed,
+ * -1 if TLS not enabled or handshake not complete
  *
  * Thread-safe: Yes - reads immutable post-handshake state
  */
-
 /* SOCKET_TLS_MAX_RENEGOTIATIONS is now defined in SocketTLSConfig.h
  * with comprehensive documentation about DoS protection rationale. */
-
 #if OPENSSL_VERSION_NUMBER >= 0x10101000L
 /**
  * validate_renegotiation_allowed - Check DoS limits and secure renegotiation
@@ -1901,17 +1744,14 @@ validate_renegotiation_allowed (Socket_T socket, SSL *ssl)
                      SOCKET_TLS_MAX_RENEGOTIATIONS);
       return -1;
     }
-
   if (!SSL_get_secure_renegotiation_support (ssl))
     {
       SocketMetrics_counter_inc (SOCKET_CTR_TLS_RENEGOTIATIONS);
       TLS_ERROR_MSG ("Insecure renegotiation not supported");
       return -1;
     }
-
   return 0;
 }
-
 /**
  * perform_renegotiation_handshake - Execute pending renegotiation handshake
  * @socket: Socket being renegotiated
@@ -1929,36 +1769,46 @@ perform_renegotiation_handshake (Socket_T socket, SSL *ssl)
       SocketMetrics_counter_inc (SOCKET_CTR_TLS_RENEGOTIATIONS);
       return 1;
     }
-
   int ssl_error = SSL_get_error (ssl, ret);
   if (ssl_error == SSL_ERROR_WANT_READ || ssl_error == SSL_ERROR_WANT_WRITE)
     {
       errno = EAGAIN;
       return 0;
     }
-
   tls_format_openssl_error ("Renegotiation handshake failed");
   RAISE_TLS_ERROR (SocketTLS_ProtocolError);
   __builtin_unreachable ();
 }
 #endif /* OPENSSL_VERSION_NUMBER >= 0x10101000L */
-
+/**
+ * check_renegotiation_validate - Validate for renegotiation check
+ * @socket: Socket
+ * @ssl: SSL out
+ *
+ * Returns: 1 if TLS 1.3 or higher, -1 if invalid
+ */
+static int
+check_renegotiation_validate (Socket_T socket, SSL **ssl)
+{
+  if (!socket->tls_enabled)
+    return -1;
+  *ssl = tls_socket_get_ssl (socket);
+  if (!*ssl)
+    return -1;
+  if (SSL_version (*ssl) >= TLS1_3_VERSION)
+    return 1;
+  return 0;
+}
 int
 SocketTLS_check_renegotiation (Socket_T socket)
 {
   assert (socket);
-
-  if (!socket->tls_enabled)
+  SSL *ssl = NULL;
+  int val = check_renegotiation_validate (socket, &ssl);
+  if (val == -1)
     return -1;
-
-  SSL *ssl = tls_socket_get_ssl (socket);
-  if (!ssl)
-    return -1;
-
-  /* TLS 1.3 doesn't support renegotiation - uses KeyUpdate instead. */
-  if (SSL_version (ssl) >= TLS1_3_VERSION)
+  if (val == 1)
     return 0;
-
 #if OPENSSL_VERSION_NUMBER >= 0x10101000L
   if (SSL_renegotiate_pending (ssl))
     {
@@ -1969,22 +1819,17 @@ SocketTLS_check_renegotiation (Socket_T socket)
 #else
   (void)socket;
 #endif
-
   return 0;
 }
-
 int
 SocketTLS_disable_renegotiation (Socket_T socket)
 {
   assert (socket);
-
   if (!socket->tls_enabled)
     return -1;
-
   SSL *ssl = tls_socket_get_ssl (socket);
   if (!ssl)
     return -1;
-
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
   /* Disable client-initiated renegotiation via SSL_OP_NO_RENEGOTIATION.
    * This option was added in OpenSSL 1.1.0h and prevents the peer from
@@ -1993,24 +1838,18 @@ SocketTLS_disable_renegotiation (Socket_T socket)
    * protocol vulnerabilities (CVE-2009-3555). */
   SSL_set_options (ssl, SSL_OP_NO_RENEGOTIATION);
 #endif
-
   /* Also reset the count since renegotiation is now disabled */
   socket->tls_renegotiation_count = 0;
-
   return 0;
 }
-
 int
 SocketTLS_get_renegotiation_count (Socket_T socket)
 {
   assert (socket);
-
   if (!socket->tls_enabled)
     return -1;
-
   return socket->tls_renegotiation_count;
 }
-
 /**
  * asn1_time_to_time_t - Convert ASN1_TIME to time_t
  * @asn1: ASN1_TIME value
@@ -2022,15 +1861,12 @@ asn1_time_to_time_t (const ASN1_TIME *asn1)
 {
   if (!asn1)
     return (time_t)-1;
-
   struct tm tm_time = { 0 };
   int ret = ASN1_TIME_to_tm (asn1, &tm_time);
   if (ret != 1)
     return (time_t)-1;
-
   return timegm (&tm_time);
 }
-
 /**
  * extract_cert_serial - Extract serial number from X509 certificate as hex
  * @cert: Certificate to extract serial from
@@ -2043,11 +1879,9 @@ extract_cert_serial (X509 *cert, char *buf, size_t buf_size)
   ASN1_INTEGER *serial = X509_get_serialNumber (cert);
   if (!serial)
     return;
-
   BIGNUM *bn = ASN1_INTEGER_to_BN (serial, NULL);
   if (!bn)
     return;
-
   char *hex = BN_bn2hex (bn);
   if (hex)
     {
@@ -2056,7 +1890,6 @@ extract_cert_serial (X509 *cert, char *buf, size_t buf_size)
     }
   BN_free (bn);
 }
-
 /**
  * extract_cert_fingerprint - Compute SHA256 fingerprint of certificate
  * @cert: Certificate to fingerprint
@@ -2068,108 +1901,100 @@ extract_cert_fingerprint (X509 *cert, char *buf, size_t buf_size)
 {
   unsigned char md[EVP_MAX_MD_SIZE];
   unsigned int md_len = 0;
-
   if (!X509_digest (cert, EVP_sha256 (), md, &md_len))
     return;
-
   int expected_size = EVP_MD_size (EVP_sha256 ());
   size_t hash_len
       = (md_len > (unsigned)expected_size) ? (size_t)expected_size : md_len;
   SocketCrypto_hex_encode (md, hash_len, buf, buf_size);
 }
-
+/**
+ * cert_info_get_names - Get subject and issuer names
+ * @cert: Cert
+ * @info: Info struct
+ */
+static void
+cert_info_get_names (X509 *cert, SocketTLS_CertInfo *info)
+{
+  X509_NAME *subject_name = X509_get_subject_name (cert);
+  if (subject_name)
+    X509_NAME_oneline (subject_name, info->subject, sizeof (info->subject));
+  X509_NAME *issuer_name = X509_get_issuer_name (cert);
+  if (issuer_name)
+    X509_NAME_oneline (issuer_name, info->issuer, sizeof (info->issuer));
+}
+/**
+ * cert_info_get_validity - Get validity times
+ * @cert: Cert
+ * @info: Info struct
+ */
+static void
+cert_info_get_validity (X509 *cert, SocketTLS_CertInfo *info)
+{
+  info->not_before = asn1_time_to_time_t (X509_get0_notBefore (cert));
+  info->not_after = asn1_time_to_time_t (X509_get0_notAfter (cert));
+}
 int
 SocketTLS_get_peer_cert_info (Socket_T socket, SocketTLS_CertInfo *info)
 {
   assert (socket);
   assert (info);
-
   memset (info, 0, sizeof (*info));
-
   SSL *ssl = tls_socket_get_ssl (socket);
   if (!ssl)
     return -1;
-
   X509 *cert = SSL_get_peer_certificate (ssl);
   if (!cert)
     return 0; /* No peer certificate */
-
-  /* Subject */
-  X509_NAME *subject_name = X509_get_subject_name (cert);
-  if (subject_name)
-    X509_NAME_oneline (subject_name, info->subject, sizeof (info->subject));
-
-  /* Issuer */
-  X509_NAME *issuer_name = X509_get_issuer_name (cert);
-  if (issuer_name)
-    X509_NAME_oneline (issuer_name, info->issuer, sizeof (info->issuer));
-
-  /* Validity period */
-  info->not_before = asn1_time_to_time_t (X509_get0_notBefore (cert));
-  info->not_after = asn1_time_to_time_t (X509_get0_notAfter (cert));
-
+  cert_info_get_names (cert, info);
+  cert_info_get_validity (cert, info);
   /* Version (0-indexed in X509, add 1 for standard numbering) */
   info->version = (int)X509_get_version (cert) + 1;
-
   extract_cert_serial (cert, info->serial, sizeof (info->serial));
   extract_cert_fingerprint (
       cert, info->fingerprint, sizeof (info->fingerprint));
-
   X509_free (cert);
   return 1;
 }
-
 time_t
 SocketTLS_get_cert_expiry (Socket_T socket)
 {
   assert (socket);
-
   SSL *ssl = tls_socket_get_ssl (socket);
   if (!ssl)
     return (time_t)-1;
-
   X509 *cert = SSL_get_peer_certificate (ssl);
   if (!cert)
     return (time_t)-1;
-
   time_t expiry = asn1_time_to_time_t (X509_get0_notAfter (cert));
   X509_free (cert);
   return expiry;
 }
-
 int
 SocketTLS_get_cert_subject (Socket_T socket, char *buf, size_t len)
 {
   assert (socket);
   assert (buf);
   assert (len > 0);
-
   buf[0] = '\0';
-
   SSL *ssl = tls_socket_get_ssl (socket);
   if (!ssl)
     return -1;
-
   X509 *cert = SSL_get_peer_certificate (ssl);
   if (!cert)
     return 0;
-
   X509_NAME *subject_name = X509_get_subject_name (cert);
   if (!subject_name)
     {
       X509_free (cert);
       return 0;
     }
-
   char *result = X509_NAME_oneline (subject_name, buf, (int)len);
   X509_free (cert);
-
   if (!result)
     return -1;
-
   return (int)strlen (buf);
 }
-
 int
 SocketTLS_get_peer_cert_chain (Socket_T socket,
                                X509 ***chain_out,
@@ -2178,44 +2003,35 @@ SocketTLS_get_peer_cert_chain (Socket_T socket,
   assert (socket);
   assert (chain_out);
   assert (chain_len);
-
   *chain_out = NULL;
   *chain_len = 0;
-
   SSL *ssl = tls_socket_get_ssl (socket);
   if (!ssl)
     return -1;
-
   /* Get the certificate chain (does NOT include peer cert for clients) */
   STACK_OF (X509) *chain = SSL_get_peer_cert_chain (ssl);
   if (!chain)
     return 0; /* No chain available */
-
   int num = sk_X509_num (chain);
   if (num <= 0)
     return 0;
-
   /* Allocate array from socket's arena */
   Arena_T arena = SocketBase_arena (socket->base);
   X509 **certs
       = Arena_alloc (arena, (size_t)num * sizeof (X509 *), __FILE__, __LINE__);
   if (!certs)
     return -1;
-
   /* Copy certificate references (caller must NOT free individual certs) */
   for (int i = 0; i < num; i++)
     {
       certs[i] = sk_X509_value (chain, i);
     }
-
   *chain_out = certs;
   *chain_len = num;
   return 1;
 }
-
 /* SOCKET_TLS_OCSP_MAX_AGE_SECONDS is now defined in SocketTLSConfig.h
  * with comprehensive documentation about replay prevention rationale. */
-
 #if !defined(OPENSSL_NO_OCSP)
 /**
  * ocsp_parse_response - Parse and validate OCSP response structure
@@ -2232,15 +2048,12 @@ ocsp_parse_response (SSL *ssl)
 {
   const unsigned char *ocsp_resp;
   long ocsp_len = SSL_get_tlsext_status_ocsp_resp (ssl, &ocsp_resp);
-
   if (ocsp_len <= 0 || !ocsp_resp)
     return NULL; /* No OCSP response stapled */
-
   /* Parse the OCSP response */
   OCSP_RESPONSE *resp = d2i_OCSP_RESPONSE (NULL, &ocsp_resp, ocsp_len);
   if (!resp)
     return NULL; /* Invalid OCSP response format */
-
   /* Check overall response status */
   int response_status = OCSP_response_status (resp);
   if (response_status != OCSP_RESPONSE_STATUS_SUCCESSFUL)
@@ -2248,14 +2061,11 @@ ocsp_parse_response (SSL *ssl)
       OCSP_RESPONSE_free (resp);
       return NULL; /* OCSP responder error */
     }
-
   /* Extract basic response for signature verification */
   OCSP_BASICRESP *basic = OCSP_response_get1_basic (resp);
   OCSP_RESPONSE_free (resp);
-
   return basic; /* May be NULL if extraction failed */
 }
-
 /**
  * ocsp_verify_signature - Verify OCSP response signature against chain
  * @basic: Basic OCSP response to verify
@@ -2275,19 +2085,14 @@ ocsp_verify_signature (OCSP_BASICRESP *basic, SSL *ssl)
   STACK_OF (X509) *chain = SSL_get_peer_cert_chain (ssl);
   SSL_CTX *ssl_ctx = SSL_get_SSL_CTX (ssl);
   X509_STORE *store = ssl_ctx ? SSL_CTX_get_cert_store (ssl_ctx) : NULL;
-
   if (!store)
     return -1; /* No trust store available */
-
   /* Trust certificates in chain for OCSP responder verification */
   int verify_flags = OCSP_TRUSTOTHER;
-
   if (OCSP_basic_verify (basic, chain, store, verify_flags) != 1)
     return -1; /* Signature verification failed */
-
   return 0;
 }
-
 /**
  * ocsp_find_issuer_in_chain - Locate issuer certificate for leaf in peer chain
  * @peer_cert: Leaf certificate
@@ -2300,22 +2105,18 @@ ocsp_find_issuer_in_chain (X509 *peer_cert, STACK_OF (X509) * chain)
 {
   if (!peer_cert || !chain)
     return NULL;
-
   int n = sk_X509_num (chain);
   for (int i = 0; i < n; i++)
     {
       X509 *issuer = sk_X509_value (chain, i);
       if (!issuer || issuer == peer_cert)
         continue;
-
       /* X509_check_issued(issuer, subject) returns X509_V_OK on match. */
       if (X509_check_issued (issuer, peer_cert) == X509_V_OK)
         return issuer;
     }
-
   return NULL;
 }
-
 /**
  * ocsp_check_cert_status - Check certificate status in OCSP response
  * @basic: Basic OCSP response containing status information
@@ -2333,33 +2134,26 @@ ocsp_check_cert_status (OCSP_BASICRESP *basic, SSL *ssl, X509 *peer_cert)
 {
   if (!basic || !ssl || !peer_cert)
     return -1;
-
   STACK_OF (X509) *chain = SSL_get_peer_cert_chain (ssl);
   X509 *issuer = ocsp_find_issuer_in_chain (peer_cert, chain);
   if (!issuer)
     return -1;
-
   OCSP_CERTID *id = OCSP_cert_to_id (NULL, peer_cert, issuer);
   if (!id)
     return -1;
-
   int reason = 0;
   ASN1_GENERALIZEDTIME *thisupd = NULL;
   ASN1_GENERALIZEDTIME *nextupd = NULL;
   ASN1_GENERALIZEDTIME *revtime = NULL;
   int status = V_OCSP_CERTSTATUS_UNKNOWN;
-
   int found = OCSP_resp_find_status (
       basic, id, &status, &reason, &revtime, &thisupd, &nextupd);
   OCSP_CERTID_free (id);
-
   if (found != 1)
     return -1; /* No matching single response for leaf cert */
-
   if (!OCSP_check_validity (
           thisupd, nextupd, SOCKET_TLS_OCSP_MAX_AGE_SECONDS, -1))
     return -1; /* Stale or not-yet-valid */
-
   switch (status)
     {
     case V_OCSP_CERTSTATUS_GOOD:
@@ -2372,28 +2166,23 @@ ocsp_check_cert_status (OCSP_BASICRESP *basic, SSL *ssl, X509 *peer_cert)
     }
 }
 #endif /* !defined(OPENSSL_NO_OCSP) */
-
 int
 SocketTLS_get_ocsp_response_status (Socket_T socket)
 {
   assert (socket);
-
   SSL *ssl = tls_socket_get_ssl (socket);
   if (!ssl)
     return -1;
-
 #if !defined(OPENSSL_NO_OCSP)
   /* Check if OCSP response is present first */
   const unsigned char *ocsp_resp_check;
   long ocsp_len_check = SSL_get_tlsext_status_ocsp_resp (ssl, &ocsp_resp_check);
   if (ocsp_len_check <= 0 || !ocsp_resp_check)
     return -1; /* No OCSP response stapled */
-
   /* Parse and validate OCSP response structure */
   OCSP_BASICRESP *basic = ocsp_parse_response (ssl);
   if (!basic)
     return -2; /* Invalid OCSP response */
-
   /* Verify peer certificate is available */
   X509 *peer_cert = SSL_get_peer_certificate (ssl);
   if (!peer_cert)
@@ -2401,7 +2190,6 @@ SocketTLS_get_ocsp_response_status (Socket_T socket)
       OCSP_BASICRESP_free (basic);
       return -2; /* No peer certificate for verification */
     }
-
   /* Verify OCSP response signature against certificate chain */
   if (ocsp_verify_signature (basic, ssl) != 0)
     {
@@ -2409,20 +2197,16 @@ SocketTLS_get_ocsp_response_status (Socket_T socket)
       OCSP_BASICRESP_free (basic);
       return -2; /* Signature verification failed */
     }
-
   /* Check certificate status in OCSP response */
   int cert_status = ocsp_check_cert_status (basic, ssl, peer_cert);
-
   X509_free (peer_cert);
   OCSP_BASICRESP_free (basic);
-
   return cert_status;
 #else
   (void)socket;
   return -1; /* OCSP not compiled in */
 #endif
 }
-
 #if !defined(OPENSSL_NO_OCSP)
 /**
  * ocsp_find_next_update - Scan OCSP basic response for next update time
@@ -2435,16 +2219,13 @@ static int
 ocsp_find_next_update (OCSP_BASICRESP *basic, time_t *next_update)
 {
   int resp_count = OCSP_resp_count (basic);
-
   for (int i = 0; i < resp_count; i++)
     {
       OCSP_SINGLERESP *single = OCSP_resp_get0 (basic, i);
       if (!single)
         continue;
-
       ASN1_GENERALIZEDTIME *nextupd = NULL;
       (void)OCSP_single_get0_status (single, NULL, NULL, NULL, &nextupd);
-
       if (nextupd)
         {
           struct tm tm_time = { 0 };
@@ -2455,59 +2236,70 @@ ocsp_find_next_update (OCSP_BASICRESP *basic, time_t *next_update)
             }
         }
     }
-
   return -1;
 }
+/**
+ * ocsp_next_update_validate - Validate for OCSP next update
+ * @socket: Socket
+ * @next_update: Out
+ * @ssl: SSL out
+ *
+ * Returns: 1 if valid, -1 if not
+ */
+static int
+ocsp_next_update_validate (Socket_T socket, time_t *next_update, SSL **ssl)
+{
+  *next_update = (time_t)-1;
+  *ssl = tls_socket_get_ssl (socket);
+  if (!*ssl)
+    return -1;
+  return 0;
+}
+/**
+ * ocsp_next_update_parse - Parse OCSP response
+ * @ssl: SSL
+ *
+ * Returns: OCSP_BASICRESP* or NULL
+ */
+static OCSP_BASICRESP *
+ocsp_next_update_parse (SSL *ssl)
+{
+  const unsigned char *ocsp_resp;
+  long ocsp_len = SSL_get_tlsext_status_ocsp_resp (ssl, &ocsp_resp);
+  if (ocsp_len <= 0 || !ocsp_resp)
+    return NULL;
+  OCSP_RESPONSE *resp = d2i_OCSP_RESPONSE (NULL, &ocsp_resp, ocsp_len);
+  if (!resp)
+    return NULL;
+  if (OCSP_response_status (resp) != OCSP_RESPONSE_STATUS_SUCCESSFUL)
+    {
+      OCSP_RESPONSE_free (resp);
+      return NULL;
+    }
+  OCSP_BASICRESP *basic = OCSP_response_get1_basic (resp);
+  OCSP_RESPONSE_free (resp);
+  return basic;
+}
 #endif /* !defined(OPENSSL_NO_OCSP) */
-
 int
 SocketTLS_get_ocsp_next_update (Socket_T socket, time_t *next_update)
 {
   assert (socket);
   assert (next_update);
-
-  *next_update = (time_t)-1;
-
-  SSL *ssl = tls_socket_get_ssl (socket);
-  if (!ssl)
-    return -1;
-
 #if !defined(OPENSSL_NO_OCSP)
-  const unsigned char *ocsp_resp;
-  long ocsp_len = SSL_get_tlsext_status_ocsp_resp (ssl, &ocsp_resp);
-
-  if (ocsp_len <= 0 || !ocsp_resp)
+  SSL *ssl = NULL;
+  if (ocsp_next_update_validate (socket, next_update, &ssl) != 0)
     return -1;
-
-  OCSP_RESPONSE *resp = d2i_OCSP_RESPONSE (NULL, &ocsp_resp, ocsp_len);
-  if (!resp)
-    return -1;
-
-  if (OCSP_response_status (resp) != OCSP_RESPONSE_STATUS_SUCCESSFUL)
-    {
-      OCSP_RESPONSE_free (resp);
-      return -1;
-    }
-
-  OCSP_BASICRESP *basic = OCSP_response_get1_basic (resp);
+  OCSP_BASICRESP *basic = ocsp_next_update_parse (ssl);
   if (!basic)
-    {
-      OCSP_RESPONSE_free (resp);
-      return -1;
-    }
-
+    return -1;
   int result = ocsp_find_next_update (basic, next_update);
-
   OCSP_BASICRESP_free (basic);
-  OCSP_RESPONSE_free (resp);
-
   return result;
 #else
   (void)socket;
   return -1;
 #endif
 }
-
 #undef T
-
 #endif /* SOCKET_HAS_TLS */
