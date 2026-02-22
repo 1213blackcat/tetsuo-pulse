@@ -3,12 +3,10 @@
  * Copyright (c) 2025 Tetsuo AI
  * https://x.com/tetsuoai
  */
-
 /**
  * @file SocketGRPCClient-h2.c
  * @brief Unary gRPC client transport integration over HTTP/2.
  */
-
 #include "grpc/SocketGRPC-private.h"
 #include "grpc/SocketGRPCWire.h"
 #include "deflate/SocketDeflate.h"
@@ -16,13 +14,11 @@
 #include "core/SocketUtil/Timeout.h"
 #include "http/SocketHTTPClient-private.h"
 #include "http/SocketHTTP2-private.h"
-
 #include "core/SocketCrypto.h"
 #include "socket/Socket.h"
 #if SOCKET_HAS_TLS
 #include "tls/SocketTLS.h"
 #endif
-
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
@@ -32,9 +28,7 @@
 #include <stdint.h>
 #include <time.h>
 #include <unistd.h>
-
 #define GRPC_MAX_IDLE_SPINS 2048
-
 typedef struct
 {
   SocketHTTPClient_T http_client;
@@ -61,33 +55,28 @@ typedef struct
   int metrics_stream_active;
   int observability_started;
 } SocketGRPC_H2CallStream;
-
 struct SocketGRPC_ClientUnaryInterceptorEntry
 {
   SocketGRPC_ClientUnaryInterceptor interceptor;
   void *userdata;
   SocketGRPC_ClientUnaryInterceptorEntry *next;
 };
-
 struct SocketGRPC_ClientStreamInterceptorEntry
 {
   SocketGRPC_ClientStreamInterceptor interceptor;
   void *userdata;
   SocketGRPC_ClientStreamInterceptorEntry *next;
 };
-
 static int
 grpc_h2_conn_process_safe (SocketHTTP2_Conn_T conn, unsigned events)
 {
   GRPC_H2_SAFE_CALL_INT (SocketHTTP2_Conn_process (conn, events), -1);
 }
-
 static int
 grpc_h2_conn_flush_safe (SocketHTTP2_Conn_T conn)
 {
   GRPC_H2_SAFE_CALL_INT (SocketHTTP2_Conn_flush (conn), -1);
 }
-
 static int
 grpc_h2_stream_send_request_safe (SocketHTTP2_Stream_T stream,
                                   const SocketHTTP_Request *http_req,
@@ -96,7 +85,6 @@ grpc_h2_stream_send_request_safe (SocketHTTP2_Stream_T stream,
   GRPC_H2_SAFE_CALL_INT (
       SocketHTTP2_Stream_send_request (stream, http_req, end_stream), -1);
 }
-
 static ssize_t
 grpc_h2_stream_send_data_safe (SocketHTTP2_Stream_T stream,
                                const void *buf,
@@ -106,7 +94,6 @@ grpc_h2_stream_send_data_safe (SocketHTTP2_Stream_T stream,
   GRPC_H2_SAFE_CALL_SSIZE (
       SocketHTTP2_Stream_send_data (stream, buf, len, end_stream), -1);
 }
-
 static int
 grpc_h2_stream_send_headers_safe (SocketHTTP2_Stream_T stream,
                                   const SocketHPACK_Header *headers,
@@ -117,16 +104,13 @@ grpc_h2_stream_send_headers_safe (SocketHTTP2_Stream_T stream,
                              stream, headers, header_count, end_stream),
                          -1);
 }
-
 static void
 grpc_h2_stream_cancel_safe (SocketHTTP2_Stream_T stream)
 {
   if (stream == NULL)
     return;
-
   GRPC_H2_SAFE_CALL_VOID (SocketHTTP2_Stream_close (stream, HTTP2_CANCEL));
 }
-
 static ssize_t
 grpc_h2_stream_recv_data_safe (SocketHTTP2_Stream_T stream,
                                void *buf,
@@ -136,7 +120,6 @@ grpc_h2_stream_recv_data_safe (SocketHTTP2_Stream_T stream,
   GRPC_H2_SAFE_CALL_SSIZE (
       SocketHTTP2_Stream_recv_data (stream, buf, len, end_stream), -1);
 }
-
 static int
 grpc_h2_stream_recv_trailers_safe (SocketHTTP2_Stream_T stream,
                                    SocketHPACK_Header *trailers,
@@ -147,7 +130,6 @@ grpc_h2_stream_recv_trailers_safe (SocketHTTP2_Stream_T stream,
                              stream, trailers, trailers_cap, trailer_count),
                          -1);
 }
-
 static void
 grpc_release_connection_safe (SocketHTTPClient_T http_client,
                               HTTPPoolEntry *conn,
@@ -155,11 +137,9 @@ grpc_release_connection_safe (SocketHTTPClient_T http_client,
 {
   if (http_client == NULL || conn == NULL)
     return;
-
   GRPC_H2_SAFE_CALL_VOID (
       httpclient_release_connection (http_client, conn, success));
 }
-
 static SocketGRPC_StatusCode
 grpc_map_httpclient_error (SocketHTTPClient_Error error)
 {
@@ -186,7 +166,6 @@ grpc_map_httpclient_error (SocketHTTPClient_Error error)
       return SOCKET_GRPC_STATUS_UNKNOWN;
     }
 }
-
 static void
 grpc_client_stream_observability_started (SocketGRPC_Call_T call,
                                           SocketGRPC_H2CallStream *ctx)
@@ -195,7 +174,6 @@ grpc_client_stream_observability_started (SocketGRPC_Call_T call,
     return;
   if (!grpc_client_observability_enabled (call))
     return;
-
   ctx->opened_at_ms = SocketTimeout_now_ms ();
   ctx->observability_started = 1;
   ctx->metrics_stream_active = 1;
@@ -209,7 +187,6 @@ grpc_client_stream_observability_started (SocketGRPC_Call_T call,
                                         1U,
                                         -1);
 }
-
 static void
 grpc_client_stream_observability_finished (SocketGRPC_Call_T call,
                                            SocketGRPC_H2CallStream *ctx)
@@ -218,7 +195,6 @@ grpc_client_stream_observability_finished (SocketGRPC_Call_T call,
   SocketGRPC_StatusCode code;
   const char *message;
   int64_t duration_ms = -1;
-
   if (ctx == NULL)
     return;
   if (ctx->metrics_stream_active)
@@ -233,7 +209,6 @@ grpc_client_stream_observability_finished (SocketGRPC_Call_T call,
       ctx->observability_started = 0;
       return;
     }
-
   status = SocketGRPC_Call_status (call);
   code = grpc_normalize_status_code (status.code);
   message = (status.message != NULL && status.message[0] != '\0')
@@ -249,7 +224,6 @@ grpc_client_stream_observability_finished (SocketGRPC_Call_T call,
       SocketMetrics_histogram_observe (SOCKET_HIST_GRPC_CLIENT_CALL_LATENCY_MS,
                                        (double)duration_ms);
     }
-
   SocketMetrics_counter_inc (SOCKET_CTR_GRPC_CLIENT_CALLS_COMPLETED);
   SocketMetrics_counter_inc (grpc_client_status_counter_metric (code));
   grpc_client_emit_observability_event (
@@ -262,7 +236,6 @@ grpc_client_stream_observability_finished (SocketGRPC_Call_T call,
       duration_ms);
   ctx->observability_started = 0;
 }
-
 static int
 grpc_apply_interceptor_stop (SocketGRPC_Call_T call,
                              SocketGRPC_Status status,
@@ -270,7 +243,6 @@ grpc_apply_interceptor_stop (SocketGRPC_Call_T call,
 {
   const char *message = status.message;
   SocketGRPC_StatusCode code = status.code;
-
   if (call == NULL)
     return -1;
   if (!grpc_status_code_valid (code) || code == SOCKET_GRPC_STATUS_OK)
@@ -280,7 +252,6 @@ grpc_apply_interceptor_stop (SocketGRPC_Call_T call,
     }
   if (message == NULL || message[0] == '\0')
     message = SocketGRPC_status_default_message (code);
-
   if (call->response_trailers != NULL)
     {
       SocketGRPC_Trailers_clear (call->response_trailers);
@@ -290,22 +261,18 @@ grpc_apply_interceptor_stop (SocketGRPC_Call_T call,
                                                message);
     }
   grpc_call_status_set (call, code, message);
-
   if (mark_stream_failed)
     call->h2_stream_state = GRPC_CALL_STREAM_FAILED;
   return -1;
 }
-
 static int
 grpc_run_client_unary_interceptors (SocketGRPC_Call_T call,
                                     const uint8_t *request_payload,
                                     size_t request_payload_len)
 {
   SocketGRPC_ClientUnaryInterceptorEntry *entry;
-
   if (call == NULL)
     return -1;
-
   entry = call->unary_interceptors;
   while (entry != NULL)
     {
@@ -314,7 +281,6 @@ grpc_run_client_unary_interceptors (SocketGRPC_Call_T call,
               SocketGRPC_status_default_message (SOCKET_GRPC_STATUS_OK) };
       int action = entry->interceptor (
           call, request_payload, request_payload_len, &status, entry->userdata);
-
       if (action == SOCKET_GRPC_INTERCEPT_CONTINUE)
         {
           entry = entry->next;
@@ -327,10 +293,8 @@ grpc_run_client_unary_interceptors (SocketGRPC_Call_T call,
         }
       return grpc_apply_interceptor_stop (call, status, 0);
     }
-
   return 0;
 }
-
 static int
 grpc_grow_heap_buffer_limited (unsigned char **buffer,
                                size_t *capacity,
@@ -339,11 +303,9 @@ grpc_grow_heap_buffer_limited (unsigned char **buffer,
 {
   size_t new_capacity;
   unsigned char *tmp;
-
   if (buffer == NULL || capacity == NULL || *buffer == NULL
       || min_capacity > max_capacity)
     return -1;
-
   new_capacity = (*capacity == 0) ? 256U : *capacity;
   if (new_capacity > max_capacity)
     new_capacity = max_capacity;
@@ -359,7 +321,6 @@ grpc_grow_heap_buffer_limited (unsigned char **buffer,
     }
   if (new_capacity < min_capacity)
     return -1;
-
   tmp = (unsigned char *)realloc (*buffer, new_capacity);
   if (tmp == NULL)
     return -1;
@@ -367,13 +328,11 @@ grpc_grow_heap_buffer_limited (unsigned char **buffer,
   *capacity = new_capacity;
   return 0;
 }
-
 static size_t
 grpc_write_gzip_header (uint8_t *output, size_t output_len)
 {
   if (output == NULL || output_len < GZIP_HEADER_MIN_SIZE)
     return 0;
-
   output[0] = GZIP_MAGIC_0;
   output[1] = GZIP_MAGIC_1;
   output[2] = GZIP_METHOD_DEFLATE;
@@ -386,7 +345,6 @@ grpc_write_gzip_header (uint8_t *output, size_t output_len)
   output[9] = GZIP_OS_UNKNOWN;
   return GZIP_HEADER_MIN_SIZE;
 }
-
 static size_t
 grpc_write_gzip_trailer (uint8_t *output,
                          size_t output_len,
@@ -395,7 +353,6 @@ grpc_write_gzip_trailer (uint8_t *output,
 {
   if (output == NULL || output_len < GZIP_TRAILER_SIZE)
     return 0;
-
   output[0] = (uint8_t)(crc & 0xFFU);
   output[1] = (uint8_t)((crc >> 8) & 0xFFU);
   output[2] = (uint8_t)((crc >> 16) & 0xFFU);
@@ -406,34 +363,27 @@ grpc_write_gzip_trailer (uint8_t *output,
   output[7] = (uint8_t)((size >> 24) & 0xFFU);
   return GZIP_TRAILER_SIZE;
 }
-
 static int
 grpc_stream_context_init_compression (SocketGRPC_Call_T call,
                                       SocketGRPC_H2CallStream *ctx)
 {
   int need_request_compression;
   int need_response_decompression;
-
   if (call == NULL || call->channel == NULL || ctx == NULL)
     return -1;
-
   need_request_compression
       = call->channel->config.enable_request_compression ? 1 : 0;
   need_response_decompression
       = call->channel->config.enable_response_decompression ? 1 : 0;
-
   ctx->request_compression = need_request_compression
                                  ? GRPC_COMPRESSION_GZIP
                                  : GRPC_COMPRESSION_IDENTITY;
   ctx->response_compression = GRPC_COMPRESSION_IDENTITY;
-
   if (!need_request_compression && !need_response_decompression)
     return 0;
-
   ctx->compression_arena = Arena_new ();
   if (ctx->compression_arena == NULL)
     return -1;
-
   if (need_request_compression)
     {
       ctx->request_deflater = SocketDeflate_Deflater_new (
@@ -441,7 +391,6 @@ grpc_stream_context_init_compression (SocketGRPC_Call_T call,
       if (ctx->request_deflater == NULL)
         return -1;
     }
-
   if (need_response_decompression)
     {
       ctx->response_inflater = SocketDeflate_Inflater_new (
@@ -450,10 +399,8 @@ grpc_stream_context_init_compression (SocketGRPC_Call_T call,
       if (ctx->response_inflater == NULL)
         return -1;
     }
-
   return 0;
 }
-
 static int
 grpc_gzip_deflate_input (SocketDeflate_Deflater_T deflater,
                          const uint8_t *input,
@@ -464,7 +411,6 @@ grpc_gzip_deflate_input (SocketDeflate_Deflater_T deflater,
 {
   const uint8_t *in_ptr = input;
   size_t in_remaining = input_len;
-
   while (in_remaining > 0)
     {
       size_t consumed = 0;
@@ -479,7 +425,6 @@ grpc_gzip_deflate_input (SocketDeflate_Deflater_T deflater,
       *len += written;
       in_ptr += consumed;
       in_remaining -= consumed;
-
       if (res == DEFLATE_OUTPUT_FULL
           || (in_remaining > 0 && consumed == 0 && written == 0))
         {
@@ -493,7 +438,6 @@ grpc_gzip_deflate_input (SocketDeflate_Deflater_T deflater,
     }
   return 0;
 }
-
 static int
 grpc_gzip_finish_deflate (SocketDeflate_Deflater_T deflater,
                           unsigned char **buf,
@@ -519,7 +463,6 @@ grpc_gzip_finish_deflate (SocketDeflate_Deflater_T deflater,
     }
   return 0;
 }
-
 static int
 grpc_gzip_compress_payload (SocketDeflate_Deflater_T deflater,
                             const uint8_t *input,
@@ -531,11 +474,9 @@ grpc_gzip_compress_payload (SocketDeflate_Deflater_T deflater,
   size_t output_cap;
   size_t output_len = 0;
   uint32_t crc;
-
   if (deflater == NULL || output_out == NULL || output_len_out == NULL
       || (input == NULL && input_len != 0))
     return -1;
-
   output_cap = SocketDeflate_compress_bound (input_len);
   if (output_cap > SIZE_MAX - (GZIP_HEADER_MIN_SIZE + GZIP_TRAILER_SIZE))
     return -1;
@@ -543,7 +484,6 @@ grpc_gzip_compress_payload (SocketDeflate_Deflater_T deflater,
   output = (unsigned char *)malloc (output_cap);
   if (output == NULL)
     return -1;
-
   if (grpc_write_gzip_header (output, output_cap) == 0)
     {
       free (output);
@@ -551,7 +491,6 @@ grpc_gzip_compress_payload (SocketDeflate_Deflater_T deflater,
     }
   output_len = GZIP_HEADER_MIN_SIZE;
   SocketDeflate_Deflater_reset (deflater);
-
   if (grpc_gzip_deflate_input (
           deflater, input, input_len, &output, &output_cap, &output_len)
       != 0)
@@ -559,14 +498,12 @@ grpc_gzip_compress_payload (SocketDeflate_Deflater_T deflater,
       free (output);
       return -1;
     }
-
   if (grpc_gzip_finish_deflate (deflater, &output, &output_cap, &output_len)
       != 0)
     {
       free (output);
       return -1;
     }
-
   if (output_cap - output_len < GZIP_TRAILER_SIZE
       && grpc_grow_heap_buffer_limited (
              &output, &output_cap, output_len + GZIP_TRAILER_SIZE, SIZE_MAX)
@@ -575,7 +512,6 @@ grpc_gzip_compress_payload (SocketDeflate_Deflater_T deflater,
       free (output);
       return -1;
     }
-
   crc = SocketDeflate_crc32 (0, input, input_len);
   if (grpc_write_gzip_trailer (output + output_len,
                                output_cap - output_len,
@@ -587,12 +523,10 @@ grpc_gzip_compress_payload (SocketDeflate_Deflater_T deflater,
       return -1;
     }
   output_len += GZIP_TRAILER_SIZE;
-
   *output_out = output;
   *output_len_out = output_len;
   return 0;
 }
-
 static SocketGRPC_StatusCode
 grpc_gzip_decompress_payload (SocketGRPC_Call_T call,
                               SocketDeflate_Inflater_T inflater,
@@ -616,44 +550,36 @@ grpc_gzip_decompress_payload (SocketGRPC_Call_T call,
   size_t total_in;
   size_t total_out;
   uint32_t crc;
-
   if (output_out == NULL || output_len_out == NULL || message_out == NULL
       || call == NULL || call->channel == NULL || inflater == NULL
       || (input == NULL && input_len != 0))
     {
       return SOCKET_GRPC_STATUS_INTERNAL;
     }
-
   *output_out = NULL;
   *output_len_out = 0;
   *message_out = "Malformed compressed gRPC response frame";
-
   res = SocketDeflate_gzip_parse_header (input, input_len, &header);
   if (res != DEFLATE_OK)
     return SOCKET_GRPC_STATUS_INTERNAL;
   if (header.header_size > input_len
       || input_len - header.header_size < GZIP_TRAILER_SIZE)
     return SOCKET_GRPC_STATUS_INTERNAL;
-
   deflate_input = input + header.header_size;
   deflate_input_len = input_len - header.header_size - GZIP_TRAILER_SIZE;
   trailer = input + input_len - GZIP_TRAILER_SIZE;
-
   max_output = call->channel->config.max_decompressed_message_bytes;
   if (max_output == 0)
     max_output = call->channel->config.max_inbound_message_bytes;
   if (max_output == 0)
     return SOCKET_GRPC_STATUS_RESOURCE_EXHAUSTED;
-
   output_cap = max_output;
   if (output_cap == 0)
     output_cap = 1U;
   output = (unsigned char *)malloc (output_cap);
   if (output == NULL)
     return SOCKET_GRPC_STATUS_RESOURCE_EXHAUSTED;
-
   SocketDeflate_Inflater_reset (inflater);
-
   res = SocketDeflate_Inflater_inflate (inflater,
                                         deflate_input,
                                         deflate_input_len,
@@ -674,7 +600,6 @@ grpc_gzip_decompress_payload (SocketGRPC_Call_T call,
       free (output);
       return SOCKET_GRPC_STATUS_INTERNAL;
     }
-
   crc = SocketDeflate_crc32 (0, output, output_len);
   if (SocketDeflate_gzip_verify_trailer (trailer, crc, (uint32_t)output_len)
       != DEFLATE_OK)
@@ -682,7 +607,6 @@ grpc_gzip_decompress_payload (SocketGRPC_Call_T call,
       free (output);
       return SOCKET_GRPC_STATUS_INTERNAL;
     }
-
   if (call->channel->config.max_decompression_ratio > 0.0)
     {
       total_in = SocketDeflate_Inflater_total_in (inflater);
@@ -697,12 +621,10 @@ grpc_gzip_decompress_payload (SocketGRPC_Call_T call,
           return SOCKET_GRPC_STATUS_RESOURCE_EXHAUSTED;
         }
     }
-
   *output_out = output;
   *output_len_out = output_len;
   return SOCKET_GRPC_STATUS_OK;
 }
-
 static SocketGRPC_StatusCode
 grpc_decode_frame_payload (SocketGRPC_Call_T call,
                            SocketGRPC_Compression response_compression,
@@ -716,11 +638,9 @@ grpc_decode_frame_payload (SocketGRPC_Call_T call,
   if (call == NULL || call->channel == NULL || arena == NULL || frame == NULL
       || payload_out == NULL || payload_len_out == NULL || message_out == NULL)
     return SOCKET_GRPC_STATUS_INTERNAL;
-
   *payload_out = NULL;
   *payload_len_out = 0;
   *message_out = "Malformed gRPC response frame";
-
   if (frame->compressed == 0)
     {
       if (frame->payload_len > call->channel->config.max_inbound_message_bytes)
@@ -739,7 +659,6 @@ grpc_decode_frame_payload (SocketGRPC_Call_T call,
         }
       return SOCKET_GRPC_STATUS_OK;
     }
-
   if (!call->channel->config.enable_response_decompression)
     {
       *message_out = "Response decompression is disabled";
@@ -755,7 +674,6 @@ grpc_decode_frame_payload (SocketGRPC_Call_T call,
       *message_out = "Response inflater unavailable";
       return SOCKET_GRPC_STATUS_INTERNAL;
     }
-
   {
     unsigned char *decoded = NULL;
     size_t decoded_len = 0;
@@ -783,10 +701,8 @@ grpc_decode_frame_payload (SocketGRPC_Call_T call,
       }
     free (decoded);
   }
-
   return SOCKET_GRPC_STATUS_OK;
 }
-
 static int
 grpc_resolve_target_scheme (const char *target,
                             int allow_cleartext,
@@ -811,7 +727,6 @@ grpc_resolve_target_scheme (const char *target,
   *scheme_out = allow_cleartext ? "http://" : "https://";
   return 0;
 }
-
 static size_t
 grpc_assemble_url (char *url,
                    const char *scheme,
@@ -837,7 +752,6 @@ grpc_assemble_url (char *url,
   url[offset] = '\0';
   return offset;
 }
-
 static char *
 grpc_build_call_url (SocketGRPC_Call_T call, Arena_T arena)
 {
@@ -850,14 +764,12 @@ grpc_build_call_url (SocketGRPC_Call_T call, Arena_T arena)
   size_t add_slash;
   size_t total;
   char *url;
-
   if (target == NULL || path == NULL)
     return NULL;
   if (grpc_resolve_target_scheme (
           target, call->channel->config.allow_http2_cleartext, &base, &scheme)
       != 0)
     return NULL;
-
   trim_len = strlen (base);
   while (trim_len > 0 && base[trim_len - 1U] == '/')
     trim_len--;
@@ -865,14 +777,12 @@ grpc_build_call_url (SocketGRPC_Call_T call, Arena_T arena)
   add_slash = (path_len > 0 && path[0] == '/') ? 0U : 1U;
   total = (scheme != NULL ? strlen (scheme) : 0U) + trim_len + add_slash
           + path_len + 1U;
-
   url = (char *)ALLOC (arena, total);
   if (url == NULL)
     return NULL;
   grpc_assemble_url (url, scheme, base, trim_len, path, path_len, add_slash);
   return url;
 }
-
 static int
 grpc_request_add_metadata (SocketGRPC_Call_T call,
                            SocketHTTPClient_Request_T req,
@@ -880,21 +790,17 @@ grpc_request_add_metadata (SocketGRPC_Call_T call,
 {
   size_t i;
   size_t count;
-
   if (call == NULL || call->channel == NULL || req == NULL || metadata == NULL)
     return 0;
-
   count = SocketGRPC_Metadata_count (metadata);
   if (count > call->channel->config.max_metadata_entries)
     return -1;
-
   for (i = 0; i < count; i++)
     {
       const SocketGRPC_MetadataEntry *entry
           = SocketGRPC_Metadata_at (metadata, i);
       if (entry == NULL || entry->key == NULL)
         continue;
-
       if (entry->is_binary)
         {
           size_t encoded_cap
@@ -935,14 +841,12 @@ grpc_request_add_metadata (SocketGRPC_Call_T call,
     }
   return 0;
 }
-
 static int
 grpc_request_add_required_headers (SocketGRPC_Call_T call,
                                    SocketHTTPClient_Request_T req)
 {
   char timeout_buf[GRPC_TIMEOUT_HEADER_MAX];
   char attempt_buf[16];
-
   if (SocketHTTPClient_Request_header (req, "content-type", GRPC_CONTENT_TYPE)
       != 0)
     return -1;
@@ -967,7 +871,6 @@ grpc_request_add_required_headers (SocketGRPC_Call_T call,
              req, "host", call->channel->authority_override)
              != 0)
     return -1;
-
   if (call->config.deadline_ms > 0)
     {
       if (SocketGRPC_Timeout_format ((int64_t)call->config.deadline_ms,
@@ -979,7 +882,6 @@ grpc_request_add_required_headers (SocketGRPC_Call_T call,
           != 0)
         return -1;
     }
-
   if (call->retry_attempt > 0)
     {
       int n = snprintf (
@@ -991,10 +893,8 @@ grpc_request_add_required_headers (SocketGRPC_Call_T call,
           != 0)
         return -1;
     }
-
   return grpc_request_add_metadata (call, req, call->request_metadata);
 }
-
 static int
 grpc_ingest_stream_trailers (SocketGRPC_Call_T call,
                              const SocketHPACK_Header *trailers,
@@ -1017,7 +917,6 @@ grpc_ingest_stream_trailers (SocketGRPC_Call_T call,
     }
   return 0;
 }
-
 static int
 grpc_receive_body_and_trailers (SocketGRPC_Call_T call,
                                 SocketHTTP2_Stream_T stream,
@@ -1030,14 +929,11 @@ grpc_receive_body_and_trailers (SocketGRPC_Call_T call,
   unsigned char *body = NULL;
   size_t total = 0;
   size_t cap = 0;
-
   if (body_out == NULL || body_len_out == NULL || error_status == NULL
       || error_message == NULL)
     return -1;
-
   *error_status = SOCKET_GRPC_STATUS_UNAVAILABLE;
   *error_message = "Failed to receive response body";
-
   for (;;)
     {
       unsigned char chunk[GRPC_RESPONSE_CHUNK];
@@ -1051,7 +947,6 @@ grpc_receive_body_and_trailers (SocketGRPC_Call_T call,
           *error_message = "Failed to receive response body";
           return -1;
         }
-
       if (n > 0)
         {
           size_t needed = total + (size_t)n;
@@ -1082,7 +977,6 @@ grpc_receive_body_and_trailers (SocketGRPC_Call_T call,
           memcpy (body + total, chunk, (size_t)n);
           total += (size_t)n;
         }
-
       {
         SocketHPACK_Header trailers[SOCKETHTTP2_MAX_DECODED_HEADERS];
         size_t trailer_count = 0;
@@ -1107,10 +1001,8 @@ grpc_receive_body_and_trailers (SocketGRPC_Call_T call,
               }
           }
       }
-
       if (end_stream)
         break;
-
       if (n == 0 && grpc_h2_conn_process_safe (conn, 0) < 0)
         {
           free (body);
@@ -1119,12 +1011,10 @@ grpc_receive_body_and_trailers (SocketGRPC_Call_T call,
           return -1;
         }
     }
-
   *body_out = body;
   *body_len_out = total;
   return 0;
 }
-
 static char *
 grpc_build_call_url_heap (SocketGRPC_Call_T call)
 {
@@ -1137,19 +1027,15 @@ grpc_build_call_url_heap (SocketGRPC_Call_T call)
   size_t add_slash;
   size_t total;
   char *url;
-
   if (call == NULL || call->channel == NULL || call->channel->target == NULL
       || call->full_method == NULL)
     return NULL;
-
   target = call->channel->target;
   path = call->full_method;
-
   if (grpc_resolve_target_scheme (
           target, call->channel->config.allow_http2_cleartext, &base, &scheme)
       != 0)
     return NULL;
-
   trim_len = strlen (base);
   while (trim_len > 0 && base[trim_len - 1U] == '/')
     trim_len--;
@@ -1157,43 +1043,34 @@ grpc_build_call_url_heap (SocketGRPC_Call_T call)
   add_slash = (path_len > 0 && path[0] == '/') ? 0U : 1U;
   total = (scheme != NULL ? strlen (scheme) : 0U) + trim_len + add_slash
           + path_len + 1U;
-
   url = (char *)malloc (total);
   if (url == NULL)
     return NULL;
   grpc_assemble_url (url, scheme, base, trim_len, path, path_len, add_slash);
   return url;
 }
-
 static void
 grpc_stream_context_cleanup (SocketGRPC_Call_T call,
                              int success,
                              int cancel_stream)
 {
   SocketGRPC_H2CallStream *ctx;
-
   if (call == NULL)
     return;
-
   ctx = (SocketGRPC_H2CallStream *)call->h2_stream_ctx;
   if (ctx == NULL)
     return;
-
   grpc_client_stream_observability_finished (call, ctx);
-
   if (ctx->conn != NULL && ctx->stream != NULL && ctx->active_stream_counted)
     {
       if (ctx->conn->proto.h2.active_streams > 0)
         ctx->conn->proto.h2.active_streams--;
       ctx->active_stream_counted = 0;
     }
-
   if (cancel_stream && ctx->stream != NULL)
     grpc_h2_stream_cancel_safe (ctx->stream);
-
   if (ctx->conn != NULL)
     grpc_release_connection_safe (ctx->http_client, ctx->conn, success);
-
   free (ctx->recv_buffer);
   ctx->recv_buffer = NULL;
   ctx->recv_cap = 0;
@@ -1202,153 +1079,20 @@ grpc_stream_context_cleanup (SocketGRPC_Call_T call,
     Arena_dispose (&ctx->compression_arena);
   ctx->request_deflater = NULL;
   ctx->response_inflater = NULL;
-
   SocketHTTPClient_Response_free (&ctx->response);
   SocketHTTPClient_Request_free (&ctx->request);
   SocketHTTPClient_free (&ctx->http_client);
-
   free (ctx);
   call->h2_stream_ctx = NULL;
   call->h2_stream_state
       = success ? GRPC_CALL_STREAM_CLOSED : GRPC_CALL_STREAM_FAILED;
 }
-
-void
-SocketGRPC_Call_h2_stream_abort (SocketGRPC_Call_T call)
-{
-  if (call == NULL)
-    return;
-  grpc_stream_context_cleanup (call, 0, 1);
-}
-
-static int
-grpc_stream_fail (SocketGRPC_Call_T call,
-                  SocketGRPC_StatusCode status,
-                  const char *message,
-                  int cancel_stream)
-{
-  if (call == NULL)
-    return -1;
-
-  if (call->response_trailers != NULL
-      && !SocketGRPC_Trailers_has_status (call->response_trailers))
-    {
-      (void)SocketGRPC_Trailers_set_status (call->response_trailers, status);
-    }
-  if (call->response_trailers != NULL && message != NULL && message[0] != '\0'
-      && SocketGRPC_Trailers_message (call->response_trailers) == NULL)
-    {
-      (void)SocketGRPC_Trailers_set_message (call->response_trailers, message);
-    }
-
-  grpc_call_status_set (call, status, message);
-  grpc_stream_context_cleanup (call, 0, cancel_stream);
-  return -1;
-}
-
-static int
-grpc_run_client_stream_interceptors (SocketGRPC_Call_T call,
-                                     SocketGRPC_StreamInterceptEvent event,
-                                     const uint8_t *payload,
-                                     size_t payload_len)
-{
-  SocketGRPC_ClientStreamInterceptorEntry *entry;
-
-  if (call == NULL)
-    return -1;
-
-  entry = call->stream_interceptors;
-  while (entry != NULL)
-    {
-      SocketGRPC_Status status
-          = { SOCKET_GRPC_STATUS_OK,
-              SocketGRPC_status_default_message (SOCKET_GRPC_STATUS_OK) };
-      int action = entry->interceptor (
-          call, event, payload, payload_len, &status, entry->userdata);
-
-      if (action == SOCKET_GRPC_INTERCEPT_CONTINUE)
-        {
-          entry = entry->next;
-          continue;
-        }
-
-      if (action != SOCKET_GRPC_INTERCEPT_STOP)
-        {
-          status.code = SOCKET_GRPC_STATUS_INTERNAL;
-          status.message = "Interceptor returned invalid action";
-        }
-
-      if (call->h2_stream_ctx != NULL)
-        {
-          SocketGRPC_StatusCode code = status.code;
-          const char *message = status.message;
-          if (!grpc_status_code_valid (code) || code == SOCKET_GRPC_STATUS_OK)
-            {
-              code = SOCKET_GRPC_STATUS_INTERNAL;
-              message = "Interceptor returned invalid status";
-            }
-          return grpc_stream_fail (call, code, message, 1);
-        }
-
-      return grpc_apply_interceptor_stop (call, status, 1);
-    }
-
-  return 0;
-}
-
-static void
-grpc_stream_finalize_status (SocketGRPC_Call_T call, int http_status_code)
-{
-  SocketGRPC_StatusCode status_code;
-
-  if (call == NULL || call->response_trailers == NULL)
-    return;
-
-  if (!SocketGRPC_Trailers_has_status (call->response_trailers))
-    {
-      status_code = SocketGRPC_http_status_to_grpc (http_status_code);
-      (void)SocketGRPC_Trailers_set_status (call->response_trailers,
-                                            status_code);
-    }
-
-  status_code = (SocketGRPC_StatusCode)SocketGRPC_Trailers_status (
-      call->response_trailers);
-  grpc_call_status_set (
-      call, status_code, SocketGRPC_Trailers_message (call->response_trailers));
-}
-
-static void
-grpc_stream_context_free_partial (SocketGRPC_H2CallStream *ctx)
-{
-  if (ctx == NULL)
-    return;
-
-  if (ctx->conn != NULL && ctx->stream != NULL && ctx->active_stream_counted)
-    {
-      if (ctx->conn->proto.h2.active_streams > 0)
-        ctx->conn->proto.h2.active_streams--;
-      ctx->active_stream_counted = 0;
-    }
-  if (ctx->stream != NULL)
-    grpc_h2_stream_cancel_safe (ctx->stream);
-  if (ctx->conn != NULL)
-    grpc_release_connection_safe (ctx->http_client, ctx->conn, 0);
-  SocketHTTPClient_Response_free (&ctx->response);
-  SocketHTTPClient_Request_free (&ctx->request);
-  SocketHTTPClient_free (&ctx->http_client);
-  free (ctx->recv_buffer);
-  if (ctx->compression_arena != NULL)
-    Arena_dispose (&ctx->compression_arena);
-  free (ctx);
-}
-
 static int
 grpc_stream_init_http_client (SocketGRPC_Call_T call,
                               SocketGRPC_H2CallStream *ctx)
 {
   SocketHTTPClient_Config cfg;
   char *url;
-
   SocketHTTPClient_config_defaults (&cfg);
   cfg.max_version = HTTP_VERSION_2;
   cfg.allow_http2_cleartext = call->channel->config.allow_http2_cleartext;
@@ -1356,75 +1100,58 @@ grpc_stream_init_http_client (SocketGRPC_Call_T call,
   cfg.tls_context = call->channel->config.tls_context;
   cfg.request_timeout_ms = call->config.deadline_ms;
   cfg.max_response_size = call->channel->config.max_cumulative_inflight_bytes;
-
   ctx->http_client = SocketHTTPClient_new (&cfg);
   if (ctx->http_client == NULL)
     return -1;
-
   url = grpc_build_call_url_heap (call);
   if (url == NULL)
     return -1;
-
   ctx->request
       = SocketHTTPClient_Request_new (ctx->http_client, HTTP_METHOD_POST, url);
   free (url);
   if (ctx->request == NULL)
     return -1;
-
   SocketHTTPClient_Request_timeout (ctx->request, call->config.deadline_ms);
   if (grpc_request_add_required_headers (call, ctx->request) != 0)
     return -1;
-
   return 0;
 }
-
 static int
 grpc_stream_connect_h2 (SocketGRPC_Call_T call, SocketGRPC_H2CallStream *ctx)
 {
   SocketHTTP_Request http_req;
   (void)call;
-
   ctx->conn = httpclient_connect (ctx->http_client, &ctx->request->uri);
   if (ctx->conn == NULL)
     return -1;
-
   httpclient_headers_prepare_request (ctx->http_client, ctx->request);
   if (ctx->conn->version != HTTP_VERSION_2 || ctx->conn->proto.h2.conn == NULL)
     return -1;
-
   ctx->h2conn = ctx->conn->proto.h2.conn;
   ctx->stream = SocketHTTP2_Stream_new (ctx->h2conn);
   if (ctx->stream == NULL)
     return -1;
-
   ctx->conn->proto.h2.active_streams++;
   ctx->active_stream_counted = 1;
-
   httpclient_http2_build_request (ctx->request, &http_req);
   if (grpc_h2_stream_send_request_safe (ctx->stream, &http_req, 0) != 0)
     return -1;
   if (grpc_h2_conn_flush_safe (ctx->h2conn) != 0)
     return -1;
-
   return 0;
 }
-
 static SocketGRPC_H2CallStream *
 grpc_stream_open_if_needed (SocketGRPC_Call_T call)
 {
   SocketGRPC_H2CallStream *ctx;
-
   if (call == NULL || call->channel == NULL)
     return NULL;
-
   ctx = (SocketGRPC_H2CallStream *)call->h2_stream_ctx;
   if (ctx != NULL)
     return ctx;
-
   ctx = (SocketGRPC_H2CallStream *)calloc (1, sizeof (*ctx));
   if (ctx == NULL)
     return NULL;
-
   if (grpc_stream_context_init_compression (call, ctx) != 0
       || grpc_stream_init_http_client (call, ctx) != 0
       || grpc_stream_connect_h2 (call, ctx) != 0)
@@ -1432,10 +1159,8 @@ grpc_stream_open_if_needed (SocketGRPC_Call_T call)
       grpc_stream_context_free_partial (ctx);
       return NULL;
     }
-
   SocketGRPC_Trailers_clear (call->response_trailers);
   grpc_call_status_set (call, SOCKET_GRPC_STATUS_OK, NULL);
-
   ctx->http_status_code = HTTP_STATUS_OK;
   ctx->deadline_ms = SocketTimeout_deadline_ms (call->config.deadline_ms);
   call->h2_stream_ctx = ctx;
@@ -1443,7 +1168,6 @@ grpc_stream_open_if_needed (SocketGRPC_Call_T call)
   grpc_client_stream_observability_started (call, ctx);
   return ctx;
 }
-
 static int
 grpc_stream_send_frame (SocketGRPC_Call_T call,
                         SocketGRPC_H2CallStream *ctx,
@@ -1453,10 +1177,8 @@ grpc_stream_send_frame (SocketGRPC_Call_T call,
 {
   size_t offset = 0;
   int idle_spins = 0;
-
   if (call == NULL || ctx == NULL || frame == NULL)
     return -1;
-
   while (offset < frame_len)
     {
       if (SocketTimeout_expired (ctx->deadline_ms))
@@ -1466,7 +1188,6 @@ grpc_stream_send_frame (SocketGRPC_Call_T call,
                                    "Deadline exceeded",
                                    1);
         }
-
       if (grpc_h2_conn_flush_safe (ctx->h2conn) != 0)
         {
           return grpc_stream_fail (call,
@@ -1474,7 +1195,6 @@ grpc_stream_send_frame (SocketGRPC_Call_T call,
                                    "Failed to flush stream send",
                                    1);
         }
-
       ssize_t n = grpc_h2_stream_send_data_safe (
           ctx->stream, frame + offset, frame_len - offset, close_send);
       if (n < 0)
@@ -1503,11 +1223,9 @@ grpc_stream_send_frame (SocketGRPC_Call_T call,
             }
           continue;
         }
-
       idle_spins = 0;
       offset += (size_t)n;
     }
-
   if (grpc_h2_conn_flush_safe (ctx->h2conn) != 0)
     {
       return grpc_stream_fail (call,
@@ -1515,7 +1233,6 @@ grpc_stream_send_frame (SocketGRPC_Call_T call,
                                "Failed to flush stream send",
                                1);
     }
-
   if (close_send)
     {
       call->h2_stream_state
@@ -1523,10 +1240,8 @@ grpc_stream_send_frame (SocketGRPC_Call_T call,
                 ? GRPC_CALL_STREAM_CLOSED
                 : GRPC_CALL_STREAM_HALF_CLOSED_LOCAL;
     }
-
   return 0;
 }
-
 static int
 grpc_stream_append_recv (SocketGRPC_Call_T call,
                          SocketGRPC_H2CallStream *ctx,
@@ -1535,19 +1250,16 @@ grpc_stream_append_recv (SocketGRPC_Call_T call,
 {
   size_t max_buffer;
   size_t needed;
-
   if (call == NULL || ctx == NULL || (chunk == NULL && chunk_len != 0))
     return -1;
   if (chunk_len == 0)
     return 0;
-
   max_buffer = call->channel->config.max_cumulative_inflight_bytes;
   if (max_buffer < SOCKET_GRPC_WIRE_FRAME_PREFIX_SIZE)
     max_buffer = SOCKET_GRPC_WIRE_FRAME_PREFIX_SIZE;
   needed = ctx->recv_len + chunk_len;
   if (needed > max_buffer)
     return -1;
-
   if (needed > ctx->recv_cap)
     {
       size_t new_cap = ctx->recv_cap == 0 ? GRPC_STREAM_RECV_BUFFER_INITIAL
@@ -1561,12 +1273,10 @@ grpc_stream_append_recv (SocketGRPC_Call_T call,
       ctx->recv_buffer = tmp;
       ctx->recv_cap = new_cap;
     }
-
   memcpy (ctx->recv_buffer + ctx->recv_len, chunk, chunk_len);
   ctx->recv_len += chunk_len;
   return 0;
 }
-
 static int
 grpc_stream_try_parse_message (SocketGRPC_Call_T call,
                                SocketGRPC_H2CallStream *ctx,
@@ -1583,22 +1293,18 @@ grpc_stream_try_parse_message (SocketGRPC_Call_T call,
   SocketGRPC_WireResult rc;
   SocketGRPC_StatusCode decode_status;
   const char *decode_message = "Malformed streaming response frame";
-
   if (call == NULL || ctx == NULL || arena == NULL || response_payload == NULL
       || response_payload_len == NULL || has_message == NULL
       || error_status == NULL || error_message == NULL)
     return -1;
-
   *error_status = SOCKET_GRPC_STATUS_INTERNAL;
   *error_message = "Malformed streaming response frame";
   *has_message = 0;
   if (ctx->recv_len == 0)
     return 0;
-
   max_frame_payload = call->channel->config.max_cumulative_inflight_bytes;
   if (max_frame_payload == 0)
     max_frame_payload = call->channel->config.max_inbound_message_bytes;
-
   rc = SocketGRPC_Frame_parse (
       ctx->recv_buffer, ctx->recv_len, max_frame_payload, &frame, &consumed);
   if (rc == SOCKET_GRPC_WIRE_INCOMPLETE)
@@ -1613,7 +1319,6 @@ grpc_stream_try_parse_message (SocketGRPC_Call_T call,
         }
       return -1;
     }
-
   decode_status = grpc_decode_frame_payload (call,
                                              ctx->response_compression,
                                              ctx->response_inflater,
@@ -1628,7 +1333,6 @@ grpc_stream_try_parse_message (SocketGRPC_Call_T call,
       *error_message = decode_message;
       return -1;
     }
-
   if (consumed < ctx->recv_len)
     {
       memmove (ctx->recv_buffer,
@@ -1639,7 +1343,6 @@ grpc_stream_try_parse_message (SocketGRPC_Call_T call,
   *has_message = 1;
   return 0;
 }
-
 static int
 grpc_stream_compress_and_frame (SocketGRPC_Call_T call,
                                 SocketGRPC_H2CallStream *ctx,
@@ -1654,7 +1357,6 @@ grpc_stream_compress_and_frame (SocketGRPC_Call_T call,
   size_t framed_len = 0;
   size_t framed_cap;
   int rc;
-
   if (ctx->request_compression == GRPC_COMPRESSION_GZIP)
     {
       if (ctx->request_deflater == NULL
@@ -1673,7 +1375,6 @@ grpc_stream_compress_and_frame (SocketGRPC_Call_T call,
       wire_payload = compressed_payload;
       compressed_flag = 1;
     }
-
   if (wire_payload_len > (size_t)UINT32_MAX
       || wire_payload_len > (SIZE_MAX - SOCKET_GRPC_WIRE_FRAME_PREFIX_SIZE))
     {
@@ -1681,7 +1382,6 @@ grpc_stream_compress_and_frame (SocketGRPC_Call_T call,
       return grpc_stream_fail (
           call, SOCKET_GRPC_STATUS_RESOURCE_EXHAUSTED, NULL, 1);
     }
-
   framed_cap = SOCKET_GRPC_WIRE_FRAME_PREFIX_SIZE + wire_payload_len;
   framed = (unsigned char *)malloc (framed_cap);
   if (framed == NULL)
@@ -1692,7 +1392,6 @@ grpc_stream_compress_and_frame (SocketGRPC_Call_T call,
                                "Out of memory framing message",
                                1);
     }
-
   if (SocketGRPC_Frame_encode (compressed_flag,
                                wire_payload,
                                (uint32_t)wire_payload_len,
@@ -1708,13 +1407,11 @@ grpc_stream_compress_and_frame (SocketGRPC_Call_T call,
                                "Failed to frame streaming request",
                                1);
     }
-
   rc = grpc_stream_send_frame (call, ctx, framed, framed_len, 0);
   free (framed);
   free (compressed_payload);
   return rc;
 }
-
 int
 SocketGRPC_Call_send_message (SocketGRPC_Call_T call,
                               const uint8_t *request_payload,
@@ -1726,10 +1423,8 @@ SocketGRPC_Call_send_message (SocketGRPC_Call_T call,
     return SocketGRPC_Call_h3_send_message (
         call, request_payload, request_payload_len);
 #endif
-
   SocketGRPC_H2CallStream *ctx;
   int rc;
-
   if (call == NULL || (request_payload == NULL && request_payload_len != 0))
     return -1;
   if (call->h2_stream_state == GRPC_CALL_STREAM_HALF_CLOSED_LOCAL
@@ -1747,15 +1442,15 @@ SocketGRPC_Call_send_message (SocketGRPC_Call_T call,
       grpc_call_status_set (call, SOCKET_GRPC_STATUS_RESOURCE_EXHAUSTED, NULL);
       return -1;
     }
-  if (grpc_run_client_stream_interceptors (call,
-                                           SOCKET_GRPC_STREAM_INTERCEPT_SEND,
-                                           request_payload,
-                                           request_payload_len)
+  if (grpc_run_client_stream_interceptors (
+                  call,
+                  SOCKET_GRPC_STREAM_INTERCEPT_SEND,
+                  request_payload,
+                  request_payload_len)
       != 0)
     {
       return -1;
     }
-
   ctx = grpc_stream_open_if_needed (call);
   if (ctx == NULL)
     {
@@ -1763,14 +1458,12 @@ SocketGRPC_Call_send_message (SocketGRPC_Call_T call,
           call, SOCKET_GRPC_STATUS_UNAVAILABLE, "Failed to initialize stream");
       return -1;
     }
-
   rc = grpc_stream_compress_and_frame (
       call, ctx, request_payload, request_payload_len);
   if (rc == 0)
     grpc_client_metrics_bytes_sent (call, request_payload_len);
   return rc;
 }
-
 int
 SocketGRPC_Call_close_send (SocketGRPC_Call_T call)
 {
@@ -1779,9 +1472,7 @@ SocketGRPC_Call_close_send (SocketGRPC_Call_T call)
       && call->channel->config.channel_mode == SOCKET_GRPC_CHANNEL_MODE_HTTP3)
     return SocketGRPC_Call_h3_close_send (call);
 #endif
-
   SocketGRPC_H2CallStream *ctx;
-
   if (call == NULL)
     return -1;
   if (call->h2_stream_state == GRPC_CALL_STREAM_HALF_CLOSED_LOCAL
@@ -1789,7 +1480,6 @@ SocketGRPC_Call_close_send (SocketGRPC_Call_T call)
     return 0;
   if (call->h2_stream_state == GRPC_CALL_STREAM_FAILED)
     return -1;
-
   ctx = grpc_stream_open_if_needed (call);
   if (ctx == NULL)
     {
@@ -1797,7 +1487,6 @@ SocketGRPC_Call_close_send (SocketGRPC_Call_T call)
           call, SOCKET_GRPC_STATUS_UNAVAILABLE, "Failed to initialize stream");
       return -1;
     }
-
   if (grpc_h2_stream_send_headers_safe (ctx->stream, NULL, 0, 1) != 0
       || grpc_h2_conn_flush_safe (ctx->h2conn) != 0)
     {
@@ -1806,23 +1495,19 @@ SocketGRPC_Call_close_send (SocketGRPC_Call_T call)
                                "Failed to close send direction",
                                1);
     }
-
   call->h2_stream_state
       = (call->h2_stream_state == GRPC_CALL_STREAM_HALF_CLOSED_REMOTE)
             ? GRPC_CALL_STREAM_CLOSED
             : GRPC_CALL_STREAM_HALF_CLOSED_LOCAL;
   return 0;
 }
-
 static int
 grpc_stream_recv_initial_headers (SocketGRPC_Call_T call,
                                   SocketGRPC_H2CallStream *ctx)
 {
   int end_stream = 0;
-
   if (ctx->headers_received)
     return 0;
-
   if (httpclient_http2_recv_headers (
           ctx->stream, ctx->h2conn, &ctx->response, &end_stream)
       < 0)
@@ -1863,7 +1548,6 @@ grpc_stream_recv_initial_headers (SocketGRPC_Call_T call,
     ctx->remote_end_stream = 1;
   return 0;
 }
-
 static int
 grpc_stream_recv_data_and_trailers (SocketGRPC_Call_T call,
                                     SocketGRPC_H2CallStream *ctx)
@@ -1886,7 +1570,6 @@ grpc_stream_recv_data_and_trailers (SocketGRPC_Call_T call,
                                "Streaming response exceeds limit",
                                1);
     }
-
   {
     SocketHPACK_Header trailers[SOCKETHTTP2_MAX_DECODED_HEADERS];
     size_t trailer_count = 0;
@@ -1908,7 +1591,6 @@ grpc_stream_recv_data_and_trailers (SocketGRPC_Call_T call,
                                  1);
       }
   }
-
   if (end_stream)
     {
       call->h2_stream_state
@@ -1917,7 +1599,6 @@ grpc_stream_recv_data_and_trailers (SocketGRPC_Call_T call,
                 : GRPC_CALL_STREAM_HALF_CLOSED_REMOTE;
       ctx->remote_end_stream = 1;
     }
-
   if (n == 0 && !ctx->remote_end_stream
       && grpc_h2_conn_process_safe (ctx->h2conn, 0) < 0)
     {
@@ -1926,10 +1607,8 @@ grpc_stream_recv_data_and_trailers (SocketGRPC_Call_T call,
                                "Failed to advance stream state",
                                1);
     }
-
   return 0;
 }
-
 int
 SocketGRPC_Call_recv_message (SocketGRPC_Call_T call,
                               Arena_T arena,
@@ -1943,17 +1622,13 @@ SocketGRPC_Call_recv_message (SocketGRPC_Call_T call,
     return SocketGRPC_Call_h3_recv_message (
         call, arena, response_payload, response_payload_len, done);
 #endif
-
   SocketGRPC_H2CallStream *ctx;
-
   if (call == NULL || arena == NULL || response_payload == NULL
       || response_payload_len == NULL || done == NULL)
     return -1;
-
   *response_payload = NULL;
   *response_payload_len = 0;
   *done = 0;
-
   if (call->h2_stream_ctx == NULL)
     {
       if (call->h2_stream_state == GRPC_CALL_STREAM_CLOSED)
@@ -1965,21 +1640,16 @@ SocketGRPC_Call_recv_message (SocketGRPC_Call_T call,
           call, SOCKET_GRPC_STATUS_FAILED_PRECONDITION, "Stream not started");
       return -1;
     }
-
   if (call->h2_stream_state == GRPC_CALL_STREAM_FAILED)
     return -1;
-
   ctx = (SocketGRPC_H2CallStream *)call->h2_stream_ctx;
-
   if (grpc_stream_recv_initial_headers (call, ctx) != 0)
     return -1;
-
   for (;;)
     {
       int has_message = 0;
       SocketGRPC_StatusCode parse_error_status = SOCKET_GRPC_STATUS_INTERNAL;
       const char *parse_error_message = "Malformed streaming response frame";
-
       if (SocketTimeout_expired (ctx->deadline_ms))
         {
           return grpc_stream_fail (call,
@@ -1987,7 +1657,6 @@ SocketGRPC_Call_recv_message (SocketGRPC_Call_T call,
                                    "Deadline exceeded",
                                    1);
         }
-
       if (grpc_stream_try_parse_message (call,
                                          ctx,
                                          arena,
@@ -2017,7 +1686,6 @@ SocketGRPC_Call_recv_message (SocketGRPC_Call_T call,
           grpc_client_metrics_bytes_received (call, *response_payload_len);
           return 0;
         }
-
       if (ctx->remote_end_stream)
         {
           if (ctx->recv_len != 0)
@@ -2036,12 +1704,10 @@ SocketGRPC_Call_recv_message (SocketGRPC_Call_T call,
           *done = 1;
           return 0;
         }
-
       if (grpc_stream_recv_data_and_trailers (call, ctx) != 0)
         return -1;
     }
 }
-
 int
 SocketGRPC_Call_metadata_add_ascii (SocketGRPC_Call_T call,
                                     const char *key,
@@ -2058,7 +1724,6 @@ SocketGRPC_Call_metadata_add_ascii (SocketGRPC_Call_T call,
              ? 0
              : -1;
 }
-
 int
 SocketGRPC_Call_metadata_add_binary (SocketGRPC_Call_T call,
                                      const char *key,
@@ -2077,7 +1742,6 @@ SocketGRPC_Call_metadata_add_binary (SocketGRPC_Call_T call,
              ? 0
              : -1;
 }
-
 void
 SocketGRPC_Call_metadata_clear (SocketGRPC_Call_T call)
 {
@@ -2085,7 +1749,6 @@ SocketGRPC_Call_metadata_clear (SocketGRPC_Call_T call)
     return;
   SocketGRPC_Metadata_clear (call->request_metadata);
 }
-
 SocketGRPC_Trailers_T
 SocketGRPC_Call_trailers (SocketGRPC_Call_T call)
 {
@@ -2093,7 +1756,6 @@ SocketGRPC_Call_trailers (SocketGRPC_Call_T call)
     return NULL;
   return call->response_trailers;
 }
-
 SocketGRPC_Status
 SocketGRPC_Call_status (SocketGRPC_Call_T call)
 {
@@ -2103,7 +1765,6 @@ SocketGRPC_Call_status (SocketGRPC_Call_T call)
     return status;
   return call->last_status;
 }
-
 int
 SocketGRPC_Call_cancel (SocketGRPC_Call_T call)
 {
@@ -2112,10 +1773,8 @@ SocketGRPC_Call_cancel (SocketGRPC_Call_T call)
       && call->channel->config.channel_mode == SOCKET_GRPC_CHANNEL_MODE_HTTP3)
     return SocketGRPC_Call_h3_cancel (call);
 #endif
-
   if (call == NULL)
     return -1;
-
   if (call->response_trailers != NULL
       && !SocketGRPC_Trailers_has_status (call->response_trailers))
     {
@@ -2124,15 +1783,11 @@ SocketGRPC_Call_cancel (SocketGRPC_Call_T call)
       (void)SocketGRPC_Trailers_set_message (call->response_trailers,
                                              "Call cancelled");
     }
-
   grpc_call_status_set (call, SOCKET_GRPC_STATUS_CANCELLED, "Call cancelled");
-
   if (call->h2_stream_ctx != NULL)
     grpc_stream_context_cleanup (call, 0, 1);
-
   return 0;
 }
-
 static int
 grpc_unary_setup_compression (SocketGRPC_Call_T call,
                               const uint8_t *request_payload,
@@ -2146,17 +1801,14 @@ grpc_unary_setup_compression (SocketGRPC_Call_T call,
 {
   Arena_T compression_arena;
   SocketDeflate_Deflater_T request_deflater;
-
   *compression_arena_out = NULL;
   *compressed_request_out = NULL;
   *wire_payload_out = request_payload;
   *wire_payload_len_out = request_payload_len;
   *response_inflater_out = NULL;
-
   if (!request_frame_compressed
       && !call->channel->config.enable_response_decompression)
     return 0;
-
   compression_arena = Arena_new ();
   if (compression_arena == NULL)
     {
@@ -2164,7 +1816,6 @@ grpc_unary_setup_compression (SocketGRPC_Call_T call,
       return -1;
     }
   *compression_arena_out = compression_arena;
-
   if (request_frame_compressed)
     {
       request_deflater = SocketDeflate_Deflater_new (compression_arena,
@@ -2184,7 +1835,6 @@ grpc_unary_setup_compression (SocketGRPC_Call_T call,
         }
       *wire_payload_out = *compressed_request_out;
     }
-
   if (call->channel->config.enable_response_decompression)
     {
       *response_inflater_out = SocketDeflate_Inflater_new (
@@ -2197,10 +1847,8 @@ grpc_unary_setup_compression (SocketGRPC_Call_T call,
           return -1;
         }
     }
-
   return 0;
 }
-
 static int
 grpc_unary_build_http_request (SocketGRPC_Call_T call,
                                Arena_T arena,
@@ -2218,11 +1866,9 @@ grpc_unary_build_http_request (SocketGRPC_Call_T call,
   size_t framed_cap;
   size_t framed_len = 0;
   char *url;
-
   *http_client_out = NULL;
   *req_out = NULL;
   *framed_out = NULL;
-
   url = grpc_build_call_url (call, arena);
   if (url == NULL)
     {
@@ -2230,7 +1876,6 @@ grpc_unary_build_http_request (SocketGRPC_Call_T call,
           call, SOCKET_GRPC_STATUS_INVALID_ARGUMENT, "Invalid channel target");
       return -1;
     }
-
   SocketHTTPClient_config_defaults (&cfg);
   cfg.max_version = HTTP_VERSION_2;
   cfg.allow_http2_cleartext = call->channel->config.allow_http2_cleartext;
@@ -2238,7 +1883,6 @@ grpc_unary_build_http_request (SocketGRPC_Call_T call,
   cfg.tls_context = call->channel->config.tls_context;
   cfg.request_timeout_ms = call->config.deadline_ms;
   cfg.max_response_size = call->channel->config.max_cumulative_inflight_bytes;
-
   http_client = SocketHTTPClient_new (&cfg);
   if (http_client == NULL)
     {
@@ -2247,7 +1891,6 @@ grpc_unary_build_http_request (SocketGRPC_Call_T call,
       return -1;
     }
   *http_client_out = http_client;
-
   req = SocketHTTPClient_Request_new (http_client, HTTP_METHOD_POST, url);
   if (req == NULL)
     {
@@ -2258,7 +1901,6 @@ grpc_unary_build_http_request (SocketGRPC_Call_T call,
       return -1;
     }
   *req_out = req;
-
   SocketHTTPClient_Request_timeout (req, call->config.deadline_ms);
   if (grpc_request_add_required_headers (call, req) != 0)
     {
@@ -2266,7 +1908,6 @@ grpc_unary_build_http_request (SocketGRPC_Call_T call,
           call, SOCKET_GRPC_STATUS_INTERNAL, "Failed to set request headers");
       return -1;
     }
-
   framed_cap = SOCKET_GRPC_WIRE_FRAME_PREFIX_SIZE + wire_request_payload_len;
   framed = (unsigned char *)malloc (framed_cap);
   if (framed == NULL)
@@ -2275,7 +1916,6 @@ grpc_unary_build_http_request (SocketGRPC_Call_T call,
       return -1;
     }
   *framed_out = framed;
-
   if (SocketGRPC_Frame_encode (request_frame_compressed,
                                wire_request_payload,
                                (uint32_t)wire_request_payload_len,
@@ -2288,17 +1928,14 @@ grpc_unary_build_http_request (SocketGRPC_Call_T call,
           call, SOCKET_GRPC_STATUS_INTERNAL, "Failed to frame request payload");
       return -1;
     }
-
   if (SocketHTTPClient_Request_body (req, framed, framed_len) != 0)
     {
       grpc_call_status_set (
           call, SOCKET_GRPC_STATUS_INTERNAL, "Failed to attach request body");
       return -1;
     }
-
   return 0;
 }
-
 static int
 grpc_unary_open_h2_stream (SocketGRPC_Call_T call,
                            SocketHTTPClient_T http_client,
@@ -2310,10 +1947,8 @@ grpc_unary_open_h2_stream (SocketGRPC_Call_T call,
   SocketHTTP2_Conn_T h2conn;
   SocketHTTP2_Stream_T stream;
   SocketHTTP_Request http_req;
-
   *conn_out = NULL;
   *stream_out = NULL;
-
   conn = httpclient_connect (http_client, &req->uri);
   if (conn == NULL)
     {
@@ -2324,16 +1959,13 @@ grpc_unary_open_h2_stream (SocketGRPC_Call_T call,
       return -1;
     }
   *conn_out = conn;
-
   httpclient_headers_prepare_request (http_client, req);
-
   if (conn->version != HTTP_VERSION_2 || conn->proto.h2.conn == NULL)
     {
       grpc_call_status_set (
           call, SOCKET_GRPC_STATUS_INTERNAL, "HTTP/2 transport not negotiated");
       return -1;
     }
-
   h2conn = conn->proto.h2.conn;
   stream = SocketHTTP2_Stream_new (h2conn);
   if (stream == NULL)
@@ -2344,7 +1976,6 @@ grpc_unary_open_h2_stream (SocketGRPC_Call_T call,
     }
   *stream_out = stream;
   conn->proto.h2.active_streams++;
-
   httpclient_http2_build_request (req, &http_req);
   if (httpclient_http2_send_request (
           stream, h2conn, &http_req, req->body, req->body_len)
@@ -2355,10 +1986,8 @@ grpc_unary_open_h2_stream (SocketGRPC_Call_T call,
                             "Failed to send HTTP/2 request");
       return -1;
     }
-
   return 0;
 }
-
 static int
 grpc_unary_validate_response_compression (SocketGRPC_Call_T call,
                                           SocketGRPC_Compression compression,
@@ -2398,7 +2027,6 @@ grpc_unary_validate_response_compression (SocketGRPC_Call_T call,
     }
   return 0;
 }
-
 static int
 grpc_unary_recv_response (SocketGRPC_Call_T call,
                           SocketHTTP2_Stream_T stream,
@@ -2414,11 +2042,9 @@ grpc_unary_recv_response (SocketGRPC_Call_T call,
   SocketGRPC_Compression response_compression;
   SocketGRPC_StatusCode recv_error_status = SOCKET_GRPC_STATUS_UNAVAILABLE;
   const char *recv_error_message = "Failed to receive response body";
-
   *response_compression_out = GRPC_COMPRESSION_IDENTITY;
   *raw_response_out = NULL;
   *raw_response_len_out = 0;
-
   if (httpclient_http2_recv_headers (stream, h2conn, response, &end_stream) < 0)
     {
       grpc_call_status_set (call,
@@ -2426,24 +2052,21 @@ grpc_unary_recv_response (SocketGRPC_Call_T call,
                             "Failed to receive response headers");
       return -1;
     }
-
-  if (grpc_ingest_response_headers (call, response->headers, end_stream) != 0)
+  if (grpc_ingest_response_headers (call, response->headers, end_stream)
+      != 0)
     {
       grpc_call_status_set (call,
                             SOCKET_GRPC_STATUS_INTERNAL,
                             "Invalid response header metadata");
       return -1;
     }
-
   response_compression
       = grpc_response_compression_from_headers (response->headers);
   if (grpc_unary_validate_response_compression (
           call, response_compression, status_code_out)
       != 0)
     return -1;
-
   *response_compression_out = response_compression;
-
   if (!end_stream)
     {
       if (grpc_receive_body_and_trailers (call,
@@ -2468,10 +2091,8 @@ grpc_unary_recv_response (SocketGRPC_Call_T call,
           return -1;
         }
     }
-
   return 0;
 }
-
 static void
 grpc_unary_finalize_status (SocketGRPC_Call_T call,
                             int64_t call_deadline_ms,
@@ -2495,20 +2116,17 @@ grpc_unary_finalize_status (SocketGRPC_Call_T call,
             }
         }
     }
-
   if (!SocketGRPC_Trailers_has_status (call->response_trailers))
     {
       SocketGRPC_StatusCode mapped
           = SocketGRPC_http_status_to_grpc (response_status_code);
       (void)SocketGRPC_Trailers_set_status (call->response_trailers, mapped);
     }
-
   *status_code_out = SocketGRPC_Trailers_status (call->response_trailers);
   grpc_call_status_set (call,
                         (SocketGRPC_StatusCode)*status_code_out,
                         SocketGRPC_Trailers_message (call->response_trailers));
 }
-
 static int
 grpc_unary_decode_response (SocketGRPC_Call_T call,
                             SocketGRPC_Compression response_compression,
@@ -2526,10 +2144,8 @@ grpc_unary_decode_response (SocketGRPC_Call_T call,
   SocketGRPC_WireResult parse_rc;
   SocketGRPC_StatusCode decode_status;
   const char *decode_message = "Malformed gRPC response frame";
-
   if (max_frame_payload == 0)
     max_frame_payload = call->channel->config.max_inbound_message_bytes;
-
   parse_rc = SocketGRPC_Frame_parse (
       raw_response, raw_response_len, max_frame_payload, &frame, &consumed);
   if (parse_rc != SOCKET_GRPC_WIRE_OK || consumed != raw_response_len)
@@ -2551,7 +2167,6 @@ grpc_unary_decode_response (SocketGRPC_Call_T call,
                                                  response_payload_len,
                                                  &decode_message);
     }
-
   if (decode_status != SOCKET_GRPC_STATUS_OK)
     {
       (void)SocketGRPC_Trailers_set_status (call->response_trailers,
@@ -2559,18 +2174,14 @@ grpc_unary_decode_response (SocketGRPC_Call_T call,
       if (decode_message != NULL
           && SocketGRPC_Trailers_message (call->response_trailers) == NULL)
         {
-          (void)SocketGRPC_Trailers_set_status (call->response_trailers,
-                                                decode_status);
           (void)SocketGRPC_Trailers_set_message (call->response_trailers,
                                                  decode_message);
         }
       grpc_call_status_set (call, decode_status, decode_message);
       return decode_status;
     }
-
   return SOCKET_GRPC_STATUS_OK;
 }
-
 static int
 grpc_unary_validate_preconditions (SocketGRPC_Call_T call,
                                    const uint8_t *request_payload,
@@ -2598,7 +2209,6 @@ grpc_unary_validate_preconditions (SocketGRPC_Call_T call,
     }
   return 0;
 }
-
 static void
 grpc_unary_attempt_cleanup (SocketHTTPClient_T *http_client,
                             SocketHTTPClient_Request_T *req,
@@ -2628,7 +2238,6 @@ grpc_unary_attempt_cleanup (SocketHTTPClient_T *http_client,
   SocketHTTPClient_Request_free (req);
   SocketHTTPClient_free (http_client);
 }
-
 static int
 grpc_call_unary_h2_single_attempt (SocketGRPC_Call_T call,
                                    const uint8_t *request_payload,
@@ -2656,7 +2265,6 @@ grpc_call_unary_h2_single_attempt (SocketGRPC_Call_T call,
   SocketGRPC_Compression response_compression = GRPC_COMPRESSION_IDENTITY;
   int request_frame_compressed = 0;
   int rc;
-
   rc = grpc_unary_validate_preconditions (call,
                                           request_payload,
                                           request_payload_len,
@@ -2665,10 +2273,8 @@ grpc_call_unary_h2_single_attempt (SocketGRPC_Call_T call,
                                           response_payload_len);
   if (rc != 0)
     return rc;
-
   request_frame_compressed
       = call->channel->config.enable_request_compression ? 1 : 0;
-
   if (grpc_unary_setup_compression (call,
                                     request_payload,
                                     request_payload_len,
@@ -2684,7 +2290,6 @@ grpc_call_unary_h2_single_attempt (SocketGRPC_Call_T call,
         return SOCKET_GRPC_STATUS_RESOURCE_EXHAUSTED;
       goto cleanup;
     }
-
   if (wire_request_payload_len > (size_t)UINT32_MAX
       || wire_request_payload_len
              > (SIZE_MAX - SOCKET_GRPC_WIRE_FRAME_PREFIX_SIZE))
@@ -2693,12 +2298,10 @@ grpc_call_unary_h2_single_attempt (SocketGRPC_Call_T call,
       status_code = SOCKET_GRPC_STATUS_RESOURCE_EXHAUSTED;
       goto cleanup;
     }
-
   call_deadline_ms = SocketTimeout_deadline_ms (call->config.deadline_ms);
   *response_payload = NULL;
   *response_payload_len = 0;
   SocketGRPC_Trailers_clear (call->response_trailers);
-
   if (grpc_unary_build_http_request (call,
                                      arena,
                                      wire_request_payload,
@@ -2709,10 +2312,8 @@ grpc_call_unary_h2_single_attempt (SocketGRPC_Call_T call,
                                      &framed)
       != 0)
     goto cleanup;
-
   if (grpc_unary_open_h2_stream (call, http_client, req, &conn, &stream) != 0)
     goto cleanup;
-
   if (grpc_unary_recv_response (call,
                                 stream,
                                 conn,
@@ -2723,10 +2324,8 @@ grpc_call_unary_h2_single_attempt (SocketGRPC_Call_T call,
                                 &status_code)
       != 0)
     goto cleanup;
-
   grpc_unary_finalize_status (
       call, call_deadline_ms, response.status_code, &status_code);
-
   if (status_code == SOCKET_GRPC_STATUS_OK && raw_response != NULL
       && raw_response_len > 0)
     {
@@ -2749,9 +2348,7 @@ grpc_call_unary_h2_single_attempt (SocketGRPC_Call_T call,
       *response_payload = NULL;
       *response_payload_len = 0;
     }
-
   transport_success = 1;
-
 cleanup:
   grpc_unary_attempt_cleanup (&http_client,
                               &req,
@@ -2765,7 +2362,6 @@ cleanup:
                               &compression_arena);
   return status_code;
 }
-
 static int
 grpc_retry_status_is_retryable (const SocketGRPC_RetryPolicy *policy,
                                 int status_code)
@@ -2775,7 +2371,6 @@ grpc_retry_status_is_retryable (const SocketGRPC_RetryPolicy *policy,
   return (policy->retryable_status_mask & (1U << (unsigned int)status_code))
          != 0;
 }
-
 static int64_t
 grpc_retry_jittered_backoff_ms (const SocketGRPC_RetryPolicy *policy,
                                 int64_t base_backoff_ms)
@@ -2783,10 +2378,8 @@ grpc_retry_jittered_backoff_ms (const SocketGRPC_RetryPolicy *policy,
   int64_t wait_ms;
   int64_t jitter;
   int64_t delta = 0;
-
   if (policy == NULL || base_backoff_ms <= 0)
     return 0;
-
   wait_ms = base_backoff_ms;
   jitter = (wait_ms * policy->jitter_percent) / 100;
   if (jitter > 0)
@@ -2794,40 +2387,32 @@ grpc_retry_jittered_backoff_ms (const SocketGRPC_RetryPolicy *policy,
       int span = (int)(jitter * 2 + 1);
       delta = (int64_t)(rand () % span) - jitter;
     }
-
   wait_ms += delta;
   return wait_ms > 0 ? wait_ms : 0;
 }
-
 static int64_t
 grpc_retry_next_backoff_ms (const SocketGRPC_RetryPolicy *policy,
                             int64_t current_backoff_ms)
 {
   int64_t next;
-
   if (policy == NULL || current_backoff_ms <= 0)
     return 0;
-
   next = (int64_t)((double)current_backoff_ms * policy->backoff_multiplier);
   if (policy->max_backoff_ms > 0 && next > policy->max_backoff_ms)
     next = policy->max_backoff_ms;
   return next > 0 ? next : 0;
 }
-
 static void
 grpc_retry_sleep_ms (int64_t delay_ms)
 {
   struct timespec req;
   struct timespec rem;
-
   if (delay_ms <= 0)
     return;
   if (delay_ms > INT_MAX)
     delay_ms = INT_MAX;
-
   req.tv_sec = (time_t)(delay_ms / 1000);
   req.tv_nsec = (long)((delay_ms % 1000) * 1000000);
-
   while (nanosleep (&req, &rem) == -1)
     {
       if (errno != EINTR)
@@ -2835,7 +2420,6 @@ grpc_retry_sleep_ms (int64_t delay_ms)
       req = rem;
     }
 }
-
 static int
 grpc_unary_set_deadline_exceeded (SocketGRPC_Call_T call)
 {
@@ -2847,7 +2431,6 @@ grpc_unary_set_deadline_exceeded (SocketGRPC_Call_T call)
                                          "Deadline exceeded");
   return SOCKET_GRPC_STATUS_DEADLINE_EXCEEDED;
 }
-
 static int
 grpc_unary_retry_backoff_wait (SocketGRPC_Call_T call,
                                const SocketGRPC_RetryPolicy *policy,
@@ -2864,13 +2447,11 @@ grpc_unary_retry_backoff_wait (SocketGRPC_Call_T call,
       if (wait_ms > remaining)
         wait_ms = remaining;
     }
-
   grpc_client_observability_call_retry (call, (uint32_t)(attempt + 1));
   if (wait_ms > 0)
     grpc_retry_sleep_ms (wait_ms);
   return 0;
 }
-
 static int
 grpc_unary_update_attempt_deadline (SocketGRPC_Call_T call,
                                     int64_t call_deadline_ms,
@@ -2890,7 +2471,6 @@ grpc_unary_update_attempt_deadline (SocketGRPC_Call_T call,
     }
   return 0;
 }
-
 static int
 grpc_unary_retry_loop (SocketGRPC_Call_T call,
                        const SocketGRPC_RetryPolicy *policy,
@@ -2907,15 +2487,12 @@ grpc_unary_retry_loop (SocketGRPC_Call_T call,
   int64_t backoff_ms = policy->initial_backoff_ms;
   int rc = -1;
   int attempt;
-
   call->retry_in_progress = 1;
   call->retry_attempt = 0;
-
   for (attempt = 1; attempt <= max_attempts; attempt++)
     {
       int status_code;
       *finish_attempt_out = (uint32_t)attempt;
-
       if (SocketTimeout_expired (call_deadline_ms)
           || grpc_unary_update_attempt_deadline (
                  call, call_deadline_ms, original_deadline_ms)
@@ -2924,7 +2501,6 @@ grpc_unary_retry_loop (SocketGRPC_Call_T call,
           rc = grpc_unary_set_deadline_exceeded (call);
           break;
         }
-
       call->retry_attempt = (uint32_t)(attempt - 1);
       rc = grpc_call_unary_h2_single_attempt (call,
                                               request_payload,
@@ -2933,7 +2509,6 @@ grpc_unary_retry_loop (SocketGRPC_Call_T call,
                                               response_payload,
                                               response_payload_len);
       status_code = (rc >= 0) ? rc : (int)SocketGRPC_Call_status (call).code;
-
       if (attempt >= max_attempts)
         break;
       if (status_code == SOCKET_GRPC_STATUS_CANCELLED
@@ -2941,7 +2516,6 @@ grpc_unary_retry_loop (SocketGRPC_Call_T call,
         break;
       if (!grpc_retry_status_is_retryable (policy, status_code))
         break;
-
       if (grpc_unary_retry_backoff_wait (
               call, policy, call_deadline_ms, backoff_ms, attempt)
           != 0)
@@ -2949,10 +2523,8 @@ grpc_unary_retry_loop (SocketGRPC_Call_T call,
           rc = grpc_unary_set_deadline_exceeded (call);
           break;
         }
-
       backoff_ms = grpc_retry_next_backoff_ms (policy, backoff_ms);
     }
-
   if (rc == SOCKET_GRPC_STATUS_DEADLINE_EXCEEDED)
     {
       (void)SocketGRPC_Trailers_set_status (
@@ -2960,13 +2532,11 @@ grpc_unary_retry_loop (SocketGRPC_Call_T call,
       (void)SocketGRPC_Trailers_set_message (call->response_trailers,
                                              "Deadline exceeded");
     }
-
   call->config.deadline_ms = original_deadline_ms;
   call->retry_attempt = 0;
   call->retry_in_progress = 0;
   return rc;
 }
-
 int
 SocketGRPC_Call_unary_h2 (SocketGRPC_Call_T call,
                           const uint8_t *request_payload,
@@ -2985,24 +2555,20 @@ SocketGRPC_Call_unary_h2 (SocketGRPC_Call_T call,
                                      response_payload,
                                      response_payload_len);
 #endif
-
   SocketGRPC_RetryPolicy policy;
   int max_attempts;
   int rc = -1;
   int64_t call_started_ms;
   uint32_t finish_attempt = 1U;
   int observability_started = 0;
-
   if (call == NULL || request_payload == NULL || arena == NULL
       || response_payload == NULL || response_payload_len == NULL)
     return -1;
-
   *response_payload = NULL;
   *response_payload_len = 0;
   call_started_ms = SocketTimeout_now_ms ();
   observability_started = grpc_client_observability_enabled (call);
   grpc_client_observability_call_started (call, request_payload_len, 1U);
-
   if (grpc_run_client_unary_interceptors (
           call, request_payload, request_payload_len)
       != 0)
@@ -3011,16 +2577,13 @@ SocketGRPC_Call_unary_h2 (SocketGRPC_Call_T call,
       goto finish;
     }
   grpc_client_metrics_bytes_sent (call, request_payload_len);
-
   policy = call->config.retry_policy;
   if (SocketGRPC_RetryPolicy_validate (&policy) != 0)
     SocketGRPC_RetryPolicy_defaults (&policy);
-
   max_attempts = 1;
   if (call->channel != NULL && call->channel->client != NULL
       && call->channel->client->config.enable_retry && !call->retry_in_progress)
     max_attempts = policy.max_attempts;
-
   if (max_attempts <= 1)
     {
       rc = grpc_call_unary_h2_single_attempt (call,
@@ -3031,7 +2594,6 @@ SocketGRPC_Call_unary_h2 (SocketGRPC_Call_T call,
                                               response_payload_len);
       goto finish;
     }
-
   rc = grpc_unary_retry_loop (call,
                               &policy,
                               max_attempts,
@@ -3041,7 +2603,6 @@ SocketGRPC_Call_unary_h2 (SocketGRPC_Call_T call,
                               response_payload,
                               response_payload_len,
                               &finish_attempt);
-
 finish:
   if (rc == SOCKET_GRPC_STATUS_OK && *response_payload_len > 0)
     grpc_client_metrics_bytes_received (call, *response_payload_len);
