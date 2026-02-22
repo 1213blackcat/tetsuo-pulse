@@ -3,7 +3,6 @@
  * Copyright (c) 2025 Tetsuo AI
  * https://x.com/tetsuoai
  */
-
 /**
  * @file SocketDNSoverTLS.c
  * @brief DNS-over-TLS transport implementation (RFC 7858, RFC 8310).
@@ -20,11 +19,8 @@
  * - Supports opportunistic and strict privacy modes (RFC 8310)
  * - SPKI pinning for Out-of-Band Key-Pinned Privacy (RFC 7858 Section 4.2)
  */
-
 #include "dns/SocketDNSoverTLS.h"
-
 #if SOCKET_HAS_TLS
-
 #include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>
@@ -35,7 +31,6 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
-
 #include "core/Arena.h"
 #include "core/SocketUtil.h"
 #include "dns/SocketDNSWire.h"
@@ -43,27 +38,22 @@
 #include "socket/SocketCommon-private.h"
 #include "tls/SocketTLS.h"
 #include "tls/SocketTLSContext.h"
-
 #undef T
 #define T SocketDNSoverTLS_T
-
 /**
  * Maximum DNS message size (65535 bytes).
  * RFC 1035 §4.2.2: TCP messages have a 16-bit length field,
  * limiting message size to 2^16 - 1 bytes (excluding the length prefix itself).
  */
 #define DOT_MAX_MESSAGE_SIZE SOCKET_DNS_MAX_MESSAGE_SIZE
-
 /**
  * Maximum number of cached TLS sessions per server.
  */
 #define DOT_SESSION_CACHE_MAX SOCKET_DOT_SESSION_CACHE_MAX
-
 /**
  * TLS session cache TTL in seconds (5 minutes).
  */
 #define DOT_SESSION_CACHE_TTL SOCKET_DOT_SESSION_CACHE_TTL
-
 /**
  * Receive buffer size for chunked reads from TLS socket.
  *
@@ -77,7 +67,6 @@
  * multiple chunks using dynamically allocated buffers (see receive_data()).
  */
 #define DOT_RECV_BUFFER_SIZE SOCKET_DEFAULT_BUFFER_SIZE
-
 /**
  * Maximum total memory for pending query allocations (CWE-770 mitigation).
  *
@@ -87,7 +76,6 @@
  * additional headroom while preventing unbounded allocation.
  */
 #define DOT_MAX_TOTAL_QUERY_BYTES (10 * 1024 * 1024)
-
 /**
  * Server address buffer size.
  *
@@ -100,7 +88,6 @@
  * Example: "fe80::1234:5678:90ab:cdef%eth0"
  */
 #define DOT_SERVER_ADDRESS_SIZE 64
-
 /**
  * DNS server name buffer size.
  *
@@ -108,7 +95,6 @@
  * Add 1 byte for null terminator.
  */
 #define DOT_SERVER_NAME_SIZE 256
-
 /**
  * SPKI pin buffer size.
  *
@@ -121,7 +107,6 @@
  * Used for RFC 7469 Public Key Pinning (HPKP) in DNS-over-TLS.
  */
 #define DOT_SPKI_PIN_SIZE 64
-
 /* Well-known DoT servers */
 static const struct
 {
@@ -137,7 +122,6 @@ static const struct
         { "quad9", "9.9.9.9", "dns.quad9.net", 0 },
         { "quad9-v6", "2620:fe::fe", "dns.quad9.net", 1 },
         { NULL, NULL, NULL, 0 } };
-
 /* Server configuration entry */
 struct ServerConfig
 {
@@ -145,11 +129,10 @@ struct ServerConfig
   int port;
   char server_name[DOT_SERVER_NAME_SIZE];
   SocketDNSoverTLS_Mode mode;
-  char spki_pin[DOT_SPKI_PIN_SIZE];        /* Base64-encoded SHA256 */
+  char spki_pin[DOT_SPKI_PIN_SIZE]; /* Base64-encoded SHA256 */
   char spki_pin_backup[DOT_SPKI_PIN_SIZE]; /* Backup pin */
-  int family;                              /* AF_INET or AF_INET6 */
+  int family; /* AF_INET or AF_INET6 */
 };
-
 /* TLS connection state */
 typedef enum
 {
@@ -159,7 +142,6 @@ typedef enum
   CONN_STATE_CONNECTED,
   CONN_STATE_ERROR
 } ConnectionState;
-
 /* TLS connection */
 struct Connection
 {
@@ -169,7 +151,6 @@ struct Connection
   int64_t connect_start_ms;
   int64_t last_activity_ms;
   int server_index;
-
   /* Receive state for 2-byte length prefix */
   unsigned char len_buf[2];
   size_t len_received;
@@ -177,13 +158,11 @@ struct Connection
   unsigned char *recv_buf;
   size_t recv_len;
   size_t recv_alloc;
-
   /* Send queue */
   unsigned char *send_buf;
   size_t send_len;
   size_t send_offset;
 };
-
 /* Pending query */
 struct SocketDNSoverTLS_Query
 {
@@ -198,57 +177,45 @@ struct SocketDNSoverTLS_Query
   struct SocketDNSoverTLS_Query *next;
   struct SocketDNSoverTLS_Query *prev;
 };
-
 /* Main transport structure */
 struct T
 {
   Arena_T arena;
-
   /* Server configuration */
   struct ServerConfig servers[DOT_MAX_CONNECTIONS];
   int server_count;
   int current_server;
-
   /* Active connection */
   struct Connection conn;
-
   /* Pending queries */
   struct SocketDNSoverTLS_Query *pending_head;
   struct SocketDNSoverTLS_Query *pending_tail;
   int pending_count;
-
   /* Memory tracking (CWE-770: Allocation of Resources Without Limits) */
   size_t total_query_bytes;
-
   /* Statistics */
   SocketDNSoverTLS_Stats stats;
-
   /* Timeouts */
   int handshake_timeout_ms;
   int query_timeout_ms;
   int idle_timeout_ms;
 };
-
 const Except_T SocketDNSoverTLS_Failed
     = { &SocketDNSoverTLS_Failed, "DNS-over-TLS operation failed" };
-
 /* Use centralized monotonic time utility from SocketUtil.h */
 #define get_monotonic_ms() Socket_get_monotonic_ms ()
-
 /* Detect address family from string */
 static int
 detect_address_family (const char *address)
 {
   struct in_addr addr4;
   struct in6_addr addr6;
-
   if (inet_pton (AF_INET, address, &addr4) == 1)
     return AF_INET;
   if (inet_pton (AF_INET6, address, &addr6) == 1)
     return AF_INET6;
   return -1;
 }
-
 /* Initialize connection structure */
 static void
 init_connection (struct Connection *conn)
@@ -259,7 +226,6 @@ init_connection (struct Connection *conn)
   conn->state = CONN_STATE_DISCONNECTED;
   conn->server_index = -1;
 }
-
 /* Close TLS connection */
 static void
 close_connection (T transport, struct Connection *conn)
@@ -272,12 +238,10 @@ close_connection (T transport, struct Connection *conn)
         }
       Socket_free (&conn->socket);
     }
-
   if (conn->tls_ctx)
     {
       SocketTLSContext_free (&conn->tls_ctx);
     }
-
   conn->state = CONN_STATE_DISCONNECTED;
   conn->len_received = 0;
   conn->msg_len = 0;
@@ -286,18 +250,15 @@ close_connection (T transport, struct Connection *conn)
   conn->send_offset = 0;
   (void)transport;
 }
-
 /* Create TLS context for server */
 static SocketTLSContext_T
 create_tls_context (T transport, struct ServerConfig *server)
 {
   SocketTLSContext_T ctx = NULL;
-
   TRY
   {
     /* Create client context with system CAs */
     ctx = SocketTLSContext_new_client (NULL);
-
     /* Set verification mode based on privacy mode */
     if (server->mode == DOT_MODE_STRICT)
       {
@@ -308,11 +269,9 @@ create_tls_context (T transport, struct ServerConfig *server)
         /* Opportunistic: accept any certificate */
         SocketTLSContext_set_verify_mode (ctx, TLS_VERIFY_NONE);
       }
-
     /* Enable session caching for resumption */
     SocketTLSContext_enable_session_cache (
         ctx, DOT_SESSION_CACHE_MAX, DOT_SESSION_CACHE_TTL);
-
     /* Add SPKI pins if configured */
     if (server->spki_pin[0] != '\0')
       {
@@ -331,11 +290,9 @@ create_tls_context (T transport, struct ServerConfig *server)
     ctx = NULL;
   }
   END_TRY;
-
   (void)transport;
   return ctx;
 }
-
 /* Setup sockaddr structure for server connection */
 static int
 setup_server_address (const struct ServerConfig *server,
@@ -343,7 +300,6 @@ setup_server_address (const struct ServerConfig *server,
                       socklen_t *addrlen)
 {
   memset (addr, 0, sizeof (*addr));
-
   if (server->family == AF_INET)
     {
       struct sockaddr_in *addr4 = (struct sockaddr_in *)addr;
@@ -366,10 +322,29 @@ setup_server_address (const struct ServerConfig *server,
     {
       return -1; /* Unknown address family */
     }
-
   return 0;
 }
-
+/* Helper: Create non-blocking TCP socket */
+static int
+create_tcp_socket (struct Connection *conn, int family)
+{
+  conn->socket = Socket_new (family, SOCK_STREAM, 0);
+  if (conn->socket == NULL)
+    return -1;
+  Socket_setnonblocking (conn->socket);
+  return Socket_fd (conn->socket);
+}
+/* Helper: Initiate asynchronous connect */
+static int
+initiate_async_connect (int fd, struct sockaddr_storage *addr, socklen_t addrlen)
+{
+  int ret = connect (fd, (struct sockaddr *)addr, addrlen);
+  if (ret < 0 && errno != EINPROGRESS)
+    {
+      return -1;
+    }
+  return 0;
+}
 /* Initiate non-blocking TCP connect to server.
  * On success, sets conn->state to CONN_STATE_CONNECTING.
  * Returns 0 on success, -1 on failure (conn is closed on error). */
@@ -384,23 +359,18 @@ start_tcp_connect (T transport,
     struct sockaddr_storage addr;
     socklen_t addrlen;
     int fd;
-
-    /* Create socket */
-    conn->socket = Socket_new (server->family, SOCK_STREAM, 0);
-    Socket_setnonblocking (conn->socket);
-    fd = Socket_fd (conn->socket);
-
     /* Setup server address */
     if (setup_server_address (server, &addr, &addrlen) < 0)
       RAISE (Socket_Failed);
-
+    /* Create socket */
+    fd = create_tcp_socket (conn, server->family);
+    if (fd < 0)
+      RAISE (Socket_Failed);
     /* Connect to server */
-    int ret = connect (fd, (struct sockaddr *)&addr, addrlen);
-    if (ret < 0 && errno != EINPROGRESS)
+    if (initiate_async_connect (fd, &addr, addrlen) < 0)
       {
         RAISE (Socket_Failed);
       }
-
     conn->state = CONN_STATE_CONNECTING;
     conn->connect_start_ms = get_monotonic_ms ();
     conn->server_index = server_index;
@@ -413,38 +383,42 @@ start_tcp_connect (T transport,
     return -1;
   }
   END_TRY;
-
   return 0;
 }
-
+/* Helper: Prepare connection by closing if necessary */
+static void
+prepare_connection_for_start (T transport, struct Connection *conn)
+{
+  if (conn->state != CONN_STATE_DISCONNECTED)
+    close_connection (transport, conn);
+}
+/* Helper: Attempt to create TLS context, updating stats on failure */
+static SocketTLSContext_T
+attempt_create_tls_context (T transport, struct ServerConfig *server)
+{
+  SocketTLSContext_T ctx = create_tls_context (transport, server);
+  if (!ctx)
+    {
+      transport->stats.handshake_failures++;
+    }
+  return ctx;
+}
 /* Start TLS connection to server */
 static int
 start_connection (T transport, int server_index)
 {
   struct ServerConfig *server;
   struct Connection *conn;
-
   if (server_index < 0 || server_index >= transport->server_count)
     return -1;
-
   server = &transport->servers[server_index];
   conn = &transport->conn;
-
-  /* Close existing connection */
-  if (conn->state != CONN_STATE_DISCONNECTED)
-    close_connection (transport, conn);
-
-  /* Create TLS context */
-  conn->tls_ctx = create_tls_context (transport, server);
+  prepare_connection_for_start (transport, conn);
+  conn->tls_ctx = attempt_create_tls_context (transport, server);
   if (!conn->tls_ctx)
-    {
-      transport->stats.handshake_failures++;
-      return -1;
-    }
-
+    return -1;
   return start_tcp_connect (transport, conn, server, server_index);
 }
-
 /* Check if TCP connection has completed */
 static int
 check_tcp_connect_complete (T transport, struct Connection *conn)
@@ -454,17 +428,14 @@ check_tcp_connect_complete (T transport, struct Connection *conn)
   struct pollfd pfd;
   SOCKET_INIT_POLLFD (pfd, fd, POLLOUT);
   int ret = poll (&pfd, 1, 0);
-
   if (ret <= 0)
     return 0; /* Still connecting */
-
   if (pfd.revents & (POLLERR | POLLHUP))
     {
       close_connection (transport, conn);
       transport->stats.handshake_failures++;
       return -1;
     }
-
   /* Check socket error */
   if (socket_check_so_error (fd) < 0)
     {
@@ -472,7 +443,6 @@ check_tcp_connect_complete (T transport, struct Connection *conn)
       transport->stats.handshake_failures++;
       return -1;
     }
-
   /* Connection established, start TLS handshake */
   TRY
   {
@@ -487,16 +457,13 @@ check_tcp_connect_complete (T transport, struct Connection *conn)
     return -1;
   }
   END_TRY;
-
   return 0;
 }
-
 /* Perform TLS handshake */
 static int
 perform_tls_handshake (T transport, struct Connection *conn, int64_t now)
 {
   volatile TLSHandshakeState hs_state;
-
   TRY
   {
     hs_state = SocketTLS_handshake (conn->socket);
@@ -514,42 +481,34 @@ perform_tls_handshake (T transport, struct Connection *conn, int64_t now)
     return -1;
   }
   END_TRY;
-
   switch (hs_state)
     {
     case TLS_HANDSHAKE_COMPLETE:
       conn->state = CONN_STATE_CONNECTED;
       conn->last_activity_ms = now;
       return 1; /* Connected */
-
     case TLS_HANDSHAKE_ERROR:
       close_connection (transport, conn);
       transport->stats.handshake_failures++;
       return -1;
-
     case TLS_HANDSHAKE_WANT_READ:
     case TLS_HANDSHAKE_WANT_WRITE:
     case TLS_HANDSHAKE_IN_PROGRESS:
     case TLS_HANDSHAKE_NOT_STARTED:
       return 0; /* Still handshaking */
     }
-
   return 0;
 }
-
 /* Continue TLS connection (non-blocking) */
 static int
 continue_connection (T transport)
 {
   struct Connection *conn = &transport->conn;
   int64_t now;
-
   if (conn->state == CONN_STATE_DISCONNECTED
       || conn->state == CONN_STATE_CONNECTED)
     return 0;
-
   now = get_monotonic_ms ();
-
   /* Check for timeout */
   if (now - conn->connect_start_ms > transport->handshake_timeout_ms)
     {
@@ -557,30 +516,24 @@ continue_connection (T transport)
       transport->stats.handshake_failures++;
       return -1;
     }
-
   if (conn->state == CONN_STATE_CONNECTING)
     {
       return check_tcp_connect_complete (transport, conn);
     }
-
   if (conn->state == CONN_STATE_HANDSHAKING)
     {
       return perform_tls_handshake (transport, conn, now);
     }
-
   return 0;
 }
-
 /* Send pending data */
 static int
 send_pending (T transport)
 {
   struct Connection *conn = &transport->conn;
   volatile ssize_t sent;
-
   if (conn->state != CONN_STATE_CONNECTED)
     return 0;
-
   while (conn->send_offset < conn->send_len)
     {
       TRY
@@ -595,61 +548,50 @@ send_pending (T transport)
         return -1;
       }
       END_TRY;
-
       if (sent <= 0)
         {
           /* Would block (returns 0 with errno=EAGAIN) */
           return 0;
         }
-
       conn->send_offset += (size_t)sent;
       transport->stats.bytes_sent += (uint64_t)sent;
       conn->last_activity_ms = get_monotonic_ms ();
     }
-
   /* All data sent */
   conn->send_len = 0;
   conn->send_offset = 0;
   return 1;
 }
-
 /* Queue query for sending */
 static int
 queue_query (T transport, struct SocketDNSoverTLS_Query *query)
 {
   struct Connection *conn = &transport->conn;
   size_t total_len;
-
   /* Validate query length fits in 16-bit length prefix (CWE-681) */
   if (query->query_len > DOT_MAX_MESSAGE_SIZE)
     {
       return -1; /* Query too large for wire format */
     }
-
   /* Need 2-byte length prefix + query */
   total_len = 2 + query->query_len;
-
   /* Allocate send buffer if needed */
   if (!conn->send_buf)
     {
       conn->send_buf = ALLOC (transport->arena, DOT_MAX_MESSAGE_SIZE + 2);
     }
-
   /* Check if there's room - avoid integer overflow (CWE-190) */
   if (total_len > DOT_MAX_MESSAGE_SIZE + 2 - conn->send_len)
     {
       return -1; /* Buffer full */
     }
-
   /* Add length prefix (network byte order) */
   conn->send_buf[conn->send_len] = (unsigned char)(query->query_len >> 8);
   conn->send_buf[conn->send_len + 1] = (unsigned char)(query->query_len & 0xFF);
   memcpy (conn->send_buf + conn->send_len + 2, query->query, query->query_len);
   conn->send_len += total_len;
-
   return 0;
 }
-
 /* Read raw data from TLS socket */
 static int
 read_tls_data (T transport,
@@ -658,11 +600,9 @@ read_tls_data (T transport,
                ssize_t *bytes_read)
 {
   volatile ssize_t n;
-
   assert (transport != NULL);
   assert (buf != NULL);
   assert (bytes_read != NULL);
-
   TRY
   {
     n = SocketTLS_recv (transport->conn.socket, buf, bufsize);
@@ -673,11 +613,9 @@ read_tls_data (T transport,
     return -1;
   }
   END_TRY;
-
   *bytes_read = n;
   return 0;
 }
-
 /* Parse 2-byte length prefix from receive buffer */
 static int
 parse_length_prefix (struct Connection *conn,
@@ -688,29 +626,24 @@ parse_length_prefix (struct Connection *conn,
   assert (conn != NULL);
   assert (buf != NULL);
   assert (processed != NULL);
-
   /* Accumulate length prefix bytes */
   while (conn->len_received < 2 && *processed < buf_len)
     {
       conn->len_buf[conn->len_received++] = buf[(*processed)++];
     }
-
   /* Decode message length once we have both bytes */
   if (conn->len_received == 2 && conn->msg_len == 0)
     {
       conn->msg_len
           = ((size_t)conn->len_buf[0] << 8) | (size_t)conn->len_buf[1];
-
       /* Validate length - reject zero-length messages (CWE-476, CWE-400) */
       if (conn->msg_len == 0 || conn->msg_len > DOT_MAX_MESSAGE_SIZE)
         {
           return -1; /* Invalid length */
         }
     }
-
   return 0;
 }
-
 /* Allocate receive buffer for incoming message */
 static int
 allocate_recv_buffer (T transport, struct Connection *conn)
@@ -719,7 +652,6 @@ allocate_recv_buffer (T transport, struct Connection *conn)
   assert (conn != NULL);
   assert (conn->msg_len > 0);
   assert (conn->msg_len <= DOT_MAX_MESSAGE_SIZE);
-
   /* Allocate or reuse buffer if large enough */
   if (!conn->recv_buf || conn->recv_alloc < conn->msg_len)
     {
@@ -730,11 +662,9 @@ allocate_recv_buffer (T transport, struct Connection *conn)
         }
       conn->recv_alloc = conn->msg_len;
     }
-
   conn->recv_len = 0;
   return 0;
 }
-
 /* Copy data into receive buffer */
 static void
 append_to_recv_buffer (struct Connection *conn,
@@ -745,11 +675,9 @@ append_to_recv_buffer (struct Connection *conn,
   assert (buf != NULL);
   assert (conn->recv_buf != NULL);
   assert (conn->recv_len + len <= conn->msg_len);
-
   memcpy (conn->recv_buf + conn->recv_len, buf, len);
   conn->recv_len += len;
 }
-
 /* Reassemble DNS message from received chunks using 2-byte length framing.
  * Returns 1 if a complete message is assembled, 0 if more data needed,
  * -1 on error (connection is closed on error). */
@@ -760,7 +688,6 @@ reassemble_dns_message (T transport,
                         size_t buf_len)
 {
   size_t processed = 0;
-
   while (processed < buf_len)
     {
       /* Parse length prefix */
@@ -769,10 +696,8 @@ reassemble_dns_message (T transport,
           close_connection (transport, conn);
           return -1;
         }
-
       if (conn->len_received < 2)
         break; /* Need more data for length prefix */
-
       /* Allocate buffer if we have the length but no buffer yet */
       if (conn->recv_buf == NULL)
         {
@@ -782,23 +707,42 @@ reassemble_dns_message (T transport,
               return -1;
             }
         }
-
       /* Copy message body */
       size_t need = conn->msg_len - conn->recv_len;
       size_t avail = buf_len - processed;
       size_t copy = (need < avail) ? need : avail;
-
       append_to_recv_buffer (conn, buf + processed, copy);
       processed += copy;
-
       /* Check if complete message */
       if (conn->recv_len == conn->msg_len)
         return 1;
     }
-
   return 0;
 }
-
+/* Helper: Receive a chunk of data from TLS socket */
+static ssize_t
+receive_tls_chunk (T transport, unsigned char *buf, size_t bufsize)
+{
+  ssize_t n;
+  if (read_tls_data (transport, buf, bufsize, &n) < 0)
+    return -1;
+  return n;
+}
+/* Helper: Process the received chunk, update stats, and reassemble */
+static int
+process_received_chunk (T transport, const unsigned char *buf, ssize_t n)
+{
+  struct Connection *conn = &transport->conn;
+  if (n <= 0)
+    {
+      if (n == 0)
+        close_connection (transport, conn);
+      return (int)n;
+    }
+  transport->stats.bytes_received += (uint64_t)n;
+  conn->last_activity_ms = get_monotonic_ms ();
+  return reassemble_dns_message (transport, conn, buf, (size_t)n);
+}
 /* Receive data from connection */
 static int
 receive_data (T transport)
@@ -806,27 +750,11 @@ receive_data (T transport)
   struct Connection *conn = &transport->conn;
   unsigned char buf[DOT_RECV_BUFFER_SIZE];
   ssize_t n;
-
   if (conn->state != CONN_STATE_CONNECTED)
     return 0;
-
-  /* Read from TLS socket */
-  if (read_tls_data (transport, buf, sizeof (buf), &n) < 0)
-    return -1;
-
-  if (n <= 0)
-    {
-      if (n == 0)
-        close_connection (transport, conn);
-      return (int)n;
-    }
-
-  transport->stats.bytes_received += (uint64_t)n;
-  conn->last_activity_ms = get_monotonic_ms ();
-
-  return reassemble_dns_message (transport, conn, buf, (size_t)n);
+  n = receive_tls_chunk (transport, buf, sizeof (buf));
+  return process_received_chunk (transport, buf, n);
 }
-
 /* Find query by ID */
 static struct SocketDNSoverTLS_Query *
 find_query_by_id (T transport, uint16_t id)
@@ -839,7 +767,6 @@ find_query_by_id (T transport, uint16_t id)
     }
   return NULL;
 }
-
 /* Complete a query */
 static void
 complete_query (T transport,
@@ -849,20 +776,16 @@ complete_query (T transport,
                 int error)
 {
   query->completed = 1;
-
   /* Remove from list */
   if (query->prev)
     query->prev->next = query->next;
   else
     transport->pending_head = query->next;
-
   if (query->next)
     query->next->prev = query->prev;
   else
     transport->pending_tail = query->prev;
-
   transport->pending_count--;
-
   /* Decrement memory tracking (CWE-770 mitigation) */
   if (transport->total_query_bytes >= query->query_len)
     {
@@ -872,20 +795,17 @@ complete_query (T transport,
     {
       transport->total_query_bytes = 0; /* Safety: prevent underflow */
     }
-
   /* Update stats */
   if (error == DOT_ERROR_SUCCESS)
     transport->stats.queries_completed++;
   else
     transport->stats.queries_failed++;
-
   /* Invoke callback */
   if (query->callback)
     {
       query->callback (query, response, len, error, query->userdata);
     }
 }
-
 /* Map DNS RCODE to error code */
 static int
 rcode_to_error (int rcode)
@@ -906,7 +826,6 @@ rcode_to_error (int rcode)
       return DOT_ERROR_INVALID;
     }
 }
-
 /* Process received message */
 static void
 process_response (T transport)
@@ -915,59 +834,49 @@ process_response (T transport)
   SocketDNS_Header hdr;
   struct SocketDNSoverTLS_Query *query;
   int error;
-
   if (conn->recv_len < DNS_HEADER_SIZE)
     {
       return; /* Invalid response */
     }
-
   /* Decode header */
   if (SocketDNS_header_decode (conn->recv_buf, conn->recv_len, &hdr) != 0)
     {
       return; /* Invalid header */
     }
-
   /* Find matching query */
   query = find_query_by_id (transport, hdr.id);
   if (!query)
     {
       return; /* Unknown query ID */
     }
-
   /* Check for errors */
   if (!hdr.qr)
     {
       return; /* Not a response */
     }
-
   error = rcode_to_error (hdr.rcode);
   complete_query (transport, query, conn->recv_buf, conn->recv_len, error);
-
   /* Reset receive state for next message */
   conn->len_received = 0;
   conn->msg_len = 0;
   conn->recv_len = 0;
 }
-
 /* Cancel pending queries with error */
 static void
 cancel_all_queries (T transport, int error)
 {
   struct SocketDNSoverTLS_Query *q, *next;
-
   for (q = transport->pending_head; q != NULL; q = next)
     {
       next = q->next;
       complete_query (transport, q, NULL, 0, error);
     }
 }
-
 /* Queue all pending queries for sending after connection established */
 static void
 queue_pending_queries (T transport)
 {
   struct SocketDNSoverTLS_Query *q;
-
   for (q = transport->pending_head; q != NULL; q = q->next)
     {
       if (!q->cancelled && !q->completed)
@@ -976,7 +885,6 @@ queue_pending_queries (T transport)
         }
     }
 }
-
 /* Process query timeouts and idle connection timeout */
 static int
 process_query_timeouts (T transport, int64_t now)
@@ -984,10 +892,8 @@ process_query_timeouts (T transport, int64_t now)
   struct SocketDNSoverTLS_Query *q, *next;
   struct Connection *conn;
   int completed;
-
   completed = 0;
   conn = &transport->conn;
-
   /* Check query timeouts */
   for (q = transport->pending_head; q != NULL; q = next)
     {
@@ -1001,26 +907,21 @@ process_query_timeouts (T transport, int64_t now)
             }
         }
     }
-
   /* Check idle timeout */
   if (conn->state == CONN_STATE_CONNECTED
       && now - conn->last_activity_ms > transport->idle_timeout_ms)
     {
       close_connection (transport, conn);
     }
-
   return completed;
 }
-
 /* Process connection state machine continuation */
 static int
 process_connection_state (T transport)
 {
   struct Connection *conn;
   int ret;
-
   conn = &transport->conn;
-
   /* Continue connection if in progress */
   if (conn->state == CONN_STATE_CONNECTING
       || conn->state == CONN_STATE_HANDSHAKING)
@@ -1032,7 +933,6 @@ process_connection_state (T transport)
           cancel_all_queries (transport, DOT_ERROR_TLS_HANDSHAKE);
           return -1;
         }
-
       if (ret > 0)
         {
           /* Just connected, queue pending queries */
@@ -1040,7 +940,6 @@ process_connection_state (T transport)
           transport->stats.connections_reused++;
         }
     }
-
   /* Start connection if disconnected but have pending queries */
   if (conn->state == CONN_STATE_DISCONNECTED)
     {
@@ -1050,68 +949,55 @@ process_connection_state (T transport)
         }
       return 0;
     }
-
   return 1; /* Connection ready or in progress */
 }
-
 /* Determine poll events based on connection state */
 static int
 get_poll_events (const struct Connection *conn)
 {
   int events = POLLIN;
-
   if (conn->state == CONN_STATE_CONNECTING
       || conn->state == CONN_STATE_HANDSHAKING || conn->send_len > 0)
     {
       events |= POLLOUT;
     }
-
   return events;
 }
-
 /* Handle connection state machine progression */
 static int
 handle_connection_progress (T transport, struct Connection *conn)
 {
   int ret;
-
   if (conn->state != CONN_STATE_CONNECTING
       && conn->state != CONN_STATE_HANDSHAKING)
     {
       return 0;
     }
-
   ret = continue_connection (transport);
   if (ret < 0)
     {
       cancel_all_queries (transport, DOT_ERROR_TLS_HANDSHAKE);
       return -1;
     }
-
   if (ret > 0)
     {
       /* Just connected, queue pending queries */
       queue_pending_queries (transport);
     }
-
   return ret;
 }
-
 /* Handle socket events for connected state */
 static int
 handle_connected_io (T transport, struct Connection *conn, short revents)
 {
   int completed = 0;
   int ret;
-
   (void)conn;
-
   /* Send pending data */
   if (revents & POLLOUT)
     {
       send_pending (transport);
     }
-
   /* Receive data */
   if (revents & POLLIN)
     {
@@ -1122,10 +1008,8 @@ handle_connected_io (T transport, struct Connection *conn, short revents)
           completed++;
         }
     }
-
   return completed;
 }
-
 /* Process socket I/O (poll, send, receive) */
 static int
 process_socket_io (T transport, int timeout_ms)
@@ -1134,22 +1018,17 @@ process_socket_io (T transport, int timeout_ms)
   struct pollfd pfd;
   int fd;
   int ret;
-
   conn = &transport->conn;
-
   /* Get socket file descriptor */
   fd = Socket_fd (conn->socket);
   if (fd < 0)
     return 0;
-
   /* Setup poll */
   SOCKET_INIT_POLLFD (pfd, fd, get_poll_events (conn));
-
   /* Poll socket */
   ret = poll (&pfd, 1, timeout_ms);
   if (ret <= 0)
     return 0;
-
   /* Check for errors */
   if (pfd.revents & (POLLERR | POLLHUP))
     {
@@ -1157,120 +1036,107 @@ process_socket_io (T transport, int timeout_ms)
       cancel_all_queries (transport, DOT_ERROR_NETWORK);
       return 0;
     }
-
   /* Handle connection progress */
   if (handle_connection_progress (transport, conn) < 0)
     return 0;
-
   /* Handle I/O for connected state */
   if (conn->state == CONN_STATE_CONNECTED)
     return handle_connected_io (transport, conn, pfd.revents);
-
   return 0;
 }
-
 T
 SocketDNSoverTLS_new (Arena_T arena)
 {
   T transport;
-
   assert (arena);
-
   transport = ALLOC (arena, sizeof (*transport));
   memset (transport, 0, sizeof (*transport));
-
   transport->arena = arena;
   transport->handshake_timeout_ms = DOT_HANDSHAKE_TIMEOUT_MS;
   transport->query_timeout_ms = DOT_DEFAULT_QUERY_TIMEOUT_MS;
   transport->idle_timeout_ms = DOT_IDLE_TIMEOUT_MS;
-
   init_connection (&transport->conn);
-
   return transport;
 }
-
 void
 SocketDNSoverTLS_free (T *transport_p)
 {
   T transport;
-
   if (!transport_p || !*transport_p)
     return;
-
   transport = *transport_p;
-
   /* Cancel all pending queries */
   cancel_all_queries (transport, DOT_ERROR_CANCELLED);
-
   /* Close connection */
   close_connection (transport, &transport->conn);
-
   *transport_p = NULL;
 }
-
-int
-SocketDNSoverTLS_configure (T transport, const SocketDNSoverTLS_Config *config)
+/* Helper: Validate configuration and detect family */
+static int
+validate_config (T transport, const SocketDNSoverTLS_Config *config, int *family)
 {
-  struct ServerConfig *server;
-  int family;
-
-  assert (transport);
-  assert (config);
-  assert (config->server_address);
-
   if (transport->server_count >= DOT_MAX_CONNECTIONS)
     return -1;
-
-  family = detect_address_family (config->server_address);
-  if (family < 0)
+  *family = detect_address_family (config->server_address);
+  if (*family < 0)
     return -1;
-
-  server = &transport->servers[transport->server_count];
-  memset (server, 0, sizeof (*server));
-
-  if (!socket_util_safe_strncpy (
-          server->address, config->server_address, sizeof (server->address)))
+  return 0;
+}
+/* Helper: Copy strings to server config with safe strncpy */
+static int
+copy_strings_to_server (struct ServerConfig *server, const SocketDNSoverTLS_Config *config)
+{
+  if (!socket_util_safe_strncpy (server->address, config->server_address, DOT_SERVER_ADDRESS_SIZE))
     return -1; /* Server address truncated */
-
-  server->port = (config->port > 0) ? config->port : DOT_PORT;
-  server->family = family;
-  server->mode = config->mode;
-
   if (config->server_name)
     {
-      if (!socket_util_safe_strncpy (server->server_name,
-                                     config->server_name,
-                                     sizeof (server->server_name)))
+      if (!socket_util_safe_strncpy (server->server_name, config->server_name, DOT_SERVER_NAME_SIZE))
         return -1; /* Server name truncated */
     }
   else
     {
       /* Use address as SNI if no server name provided */
-      if (!socket_util_safe_strncpy (server->server_name,
-                                     config->server_address,
-                                     sizeof (server->server_name)))
+      if (!socket_util_safe_strncpy (server->server_name, config->server_address, DOT_SERVER_NAME_SIZE))
         return -1; /* Server name (from address) truncated */
     }
-
   if (config->spki_pin)
     {
-      if (!socket_util_safe_strncpy (
-              server->spki_pin, config->spki_pin, sizeof (server->spki_pin)))
+      if (!socket_util_safe_strncpy (server->spki_pin, config->spki_pin, DOT_SPKI_PIN_SIZE))
         return -1; /* SPKI pin truncated */
     }
-
   if (config->spki_pin_backup)
     {
-      if (!socket_util_safe_strncpy (server->spki_pin_backup,
-                                     config->spki_pin_backup,
-                                     sizeof (server->spki_pin_backup)))
+      if (!socket_util_safe_strncpy (server->spki_pin_backup, config->spki_pin_backup, DOT_SPKI_PIN_SIZE))
         return -1; /* SPKI backup pin truncated */
     }
-
+  return 0;
+}
+/* Helper: Set basic server configuration fields */
+static void
+set_server_basics (struct ServerConfig *server, const SocketDNSoverTLS_Config *config, int family)
+{
+  server->port = (config->port > 0) ? config->port : DOT_PORT;
+  server->family = family;
+  server->mode = config->mode;
+}
+int
+SocketDNSoverTLS_configure (T transport, const SocketDNSoverTLS_Config *config)
+{
+  struct ServerConfig *server;
+  int family;
+  assert (transport);
+  assert (config);
+  assert (config->server_address);
+  if (validate_config (transport, config, &family) < 0)
+    return -1;
+  server = &transport->servers[transport->server_count];
+  memset (server, 0, sizeof (*server));
+  if (copy_strings_to_server (server, config) < 0)
+    return -1;
+  set_server_basics (server, config, family);
   transport->server_count++;
   return 0;
 }
-
 int
 SocketDNSoverTLS_add_server (T transport,
                              const char *server_name,
@@ -1278,10 +1144,8 @@ SocketDNSoverTLS_add_server (T transport,
 {
   SocketDNSoverTLS_Config config;
   int i;
-
   assert (transport);
   assert (server_name);
-
   /* Look up well-known server */
   for (i = 0; well_known_servers[i].name != NULL; i++)
     {
@@ -1295,48 +1159,38 @@ SocketDNSoverTLS_add_server (T transport,
           return SocketDNSoverTLS_configure (transport, &config);
         }
     }
-
   return -1; /* Unknown server */
 }
-
 void
 SocketDNSoverTLS_clear_servers (T transport)
 {
   assert (transport);
-
   close_connection (transport, &transport->conn);
   transport->server_count = 0;
   transport->current_server = 0;
 }
-
 int
 SocketDNSoverTLS_server_count (T transport)
 {
   assert (transport);
   return transport->server_count;
 }
-
 /* Validate query can be submitted */
 static int
 validate_query_submission (T transport, size_t query_len)
 {
   if (transport->server_count == 0)
     return -1;
-
   /* Validate query length to prevent memory exhaustion (CWE-770) */
   if (query_len > DOT_MAX_MESSAGE_SIZE)
     return -1;
-
   if (transport->pending_count >= DOT_MAX_PENDING_QUERIES)
     return -1;
-
   /* Check cumulative memory limit (CWE-770 mitigation) */
   if (transport->total_query_bytes + query_len > DOT_MAX_TOTAL_QUERY_BYTES)
     return -1;
-
   return 0;
 }
-
 /* Allocate and initialize query structure */
 static struct SocketDNSoverTLS_Query *
 create_query (T transport,
@@ -1347,10 +1201,8 @@ create_query (T transport,
               void *userdata)
 {
   struct SocketDNSoverTLS_Query *q;
-
   q = ALLOC (transport->arena, sizeof (*q));
   memset (q, 0, sizeof (*q));
-
   q->id = id;
   q->query = ALLOC (transport->arena, len);
   memcpy (q->query, query, len);
@@ -1358,10 +1210,8 @@ create_query (T transport,
   q->sent_time_ms = get_monotonic_ms ();
   q->callback = callback;
   q->userdata = userdata;
-
   return q;
 }
-
 /* Add query to pending list */
 static void
 enqueue_query (T transport, struct SocketDNSoverTLS_Query *q)
@@ -1376,18 +1226,15 @@ enqueue_query (T transport, struct SocketDNSoverTLS_Query *q)
   transport->pending_count++;
   transport->stats.queries_sent++;
 }
-
 /* Ensure connection is established, with fallback */
 static int
 ensure_connected (T transport)
 {
   if (transport->conn.state != CONN_STATE_DISCONNECTED)
     return 0; /* Already connecting or connected */
-
   /* Try current server */
   if (start_connection (transport, transport->current_server) == 0)
     return 0;
-
   /* Fallback to next server - protect against division by zero (CWE-369) */
   if (transport->server_count > 0)
     {
@@ -1396,10 +1243,8 @@ ensure_connected (T transport)
       if (start_connection (transport, transport->current_server) == 0)
         return 0;
     }
-
   return -1; /* All servers failed */
 }
-
 SocketDNSoverTLS_Query_T
 SocketDNSoverTLS_query (T transport,
                         const unsigned char *query,
@@ -1409,84 +1254,65 @@ SocketDNSoverTLS_query (T transport,
 {
   struct SocketDNSoverTLS_Query *q;
   SocketDNS_Header hdr;
-
   assert (transport);
   assert (query);
   assert (callback);
   assert (len >= DNS_HEADER_SIZE);
-
   /* Validate submission */
   if (validate_query_submission (transport, len) < 0)
     return NULL;
-
   /* Parse query ID */
   if (SocketDNS_header_decode (query, len, &hdr) != 0)
     return NULL;
-
   /* Create query */
   q = create_query (transport, query, len, hdr.id, callback, userdata);
-
   /* Track memory (CWE-770 mitigation) */
   transport->total_query_bytes += len;
-
   /* Add to pending list */
   enqueue_query (transport, q);
-
   /* Ensure connection */
   if (ensure_connected (transport) < 0)
     {
       complete_query (transport, q, NULL, 0, DOT_ERROR_NETWORK);
       return NULL;
     }
-
   /* Queue for sending if ready */
   if (transport->conn.state == CONN_STATE_CONNECTED)
     queue_query (transport, q);
-
   return q;
 }
-
 int
 SocketDNSoverTLS_cancel (T transport, SocketDNSoverTLS_Query_T query)
 {
   assert (transport);
-
   if (!query || query->cancelled || query->completed)
     return -1;
-
   query->cancelled = 1;
   complete_query (transport, query, NULL, 0, DOT_ERROR_CANCELLED);
   return 0;
 }
-
 uint16_t
 SocketDNSoverTLS_query_id (SocketDNSoverTLS_Query_T query)
 {
   assert (query);
   return query->id;
 }
-
 int
 SocketDNSoverTLS_process (T transport, int timeout_ms)
 {
   int completed;
   int64_t now;
   int state_result;
-
   assert (transport);
-
   completed = 0;
   now = get_monotonic_ms ();
-
   /* Handle timeouts */
   completed += process_query_timeouts (transport, now);
-
   /* No server configured */
   if (transport->server_count == 0)
     {
       return completed;
     }
-
   /* Process connection state machine */
   state_result = process_connection_state (transport);
   if (state_result < 0)
@@ -1494,56 +1320,45 @@ SocketDNSoverTLS_process (T transport, int timeout_ms)
       /* Connection failed */
       return completed;
     }
-
   if (state_result == 0)
     {
       /* Disconnected, no I/O to perform */
       return completed;
     }
-
   /* Handle I/O */
   completed += process_socket_io (transport, timeout_ms);
-
   return completed;
 }
-
 int
 SocketDNSoverTLS_fd (T transport)
 {
   assert (transport);
-
   if (transport->conn.socket
       && transport->conn.state != CONN_STATE_DISCONNECTED)
     {
       return Socket_fd (transport->conn.socket);
     }
-
   return -1;
 }
-
 int
 SocketDNSoverTLS_pending_count (T transport)
 {
   assert (transport);
   return transport->pending_count;
 }
-
 void
 SocketDNSoverTLS_close_all (T transport)
 {
   assert (transport);
-
   cancel_all_queries (transport, DOT_ERROR_CANCELLED);
   close_connection (transport, &transport->conn);
 }
-
 int
 SocketDNSoverTLS_is_connected (T transport)
 {
   assert (transport);
   return (transport->conn.state == CONN_STATE_CONNECTED) ? 1 : 0;
 }
-
 void
 SocketDNSoverTLS_stats (T transport, SocketDNSoverTLS_Stats *stats)
 {
@@ -1551,7 +1366,6 @@ SocketDNSoverTLS_stats (T transport, SocketDNSoverTLS_Stats *stats)
   assert (stats);
   *stats = transport->stats;
 }
-
 /* Dispatch table for error messages */
 static const char *error_messages[] = {
   [0] = "Success",
@@ -1569,20 +1383,15 @@ static const char *error_messages[] = {
   [12] = "Server refused query",
   [13] = "SPKI pin mismatch",
 };
-
 #define ERROR_MESSAGE_COUNT \
   (sizeof (error_messages) / sizeof (error_messages[0]))
-
 const char *
 SocketDNSoverTLS_strerror (int error)
 {
   /* Convert error code to array index (error codes are negative or zero) */
   int index = (error <= 0) ? -error : error;
-
   if (index >= (int)ERROR_MESSAGE_COUNT)
     return "Unknown error";
-
   return error_messages[index];
 }
-
 #endif /* SOCKET_HAS_TLS */
