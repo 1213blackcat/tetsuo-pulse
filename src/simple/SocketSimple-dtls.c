@@ -94,6 +94,7 @@ Socket_simple_dtls_options_defaults (SocketSimple_DTLSOptions *opts)
  *
  * @param opts Source options structure
  * @param ca_file Output: CA file path
+ * @param ca_path Output: CA directory path
  * @param verify_cert Output: Certificate verification flag
  * @param client_cert Output: Client certificate path
  * @param client_key Output: Client key path
@@ -104,6 +105,7 @@ Socket_simple_dtls_options_defaults (SocketSimple_DTLSOptions *opts)
 static void
 copy_dtls_options (const SocketSimple_DTLSOptions *opts,
                    const char **ca_file,
+                   const char **ca_path,
                    int *verify_cert,
                    const char **client_cert,
                    const char **client_key,
@@ -111,7 +113,11 @@ copy_dtls_options (const SocketSimple_DTLSOptions *opts,
                    const char ***alpn,
                    size_t *alpn_count)
 {
+  if (!opts)
+    return;
+
   *ca_file = opts->ca_file;
+  *ca_path = opts->ca_path;
   *verify_cert = opts->verify_cert;
   *client_cert = opts->client_cert;
   *client_key = opts->client_key;
@@ -124,6 +130,7 @@ copy_dtls_options (const SocketSimple_DTLSOptions *opts,
  * @brief Create and configure a DTLS client context with all options.
  *
  * @param ca_file CA certificate file path (NULL for system defaults)
+ * @param ca_path CA directory path (NULL if not using directory)
  * @param verify_cert Whether to verify peer certificate
  * @param client_cert Client certificate file (NULL if not using mTLS)
  * @param client_key Client private key file (NULL if not using mTLS)
@@ -134,6 +141,7 @@ copy_dtls_options (const SocketSimple_DTLSOptions *opts,
  */
 static SocketDTLSContext_T
 create_and_configure_dtls_client_context (const char *ca_file,
+                                          const char *ca_path,
                                           int verify_cert,
                                           const char *client_cert,
                                           const char *client_key,
@@ -142,6 +150,11 @@ create_and_configure_dtls_client_context (const char *ca_file,
                                           size_t alpn_count)
 {
   SocketDTLSContext_T ctx = SocketDTLSContext_new_client (ca_file);
+
+  if (ca_path && ca_path[0] != '\0')
+    {
+      SocketDTLSContext_load_ca_directory (ctx, ca_path);
+    }
 
   if (!verify_cert)
     {
@@ -256,6 +269,7 @@ Socket_simple_dtls_connect_ex (const char *host,
   int timeout_ms;
   int verify_cert;
   const char *ca_file;
+  const char *ca_path;
   const char *client_cert;
   const char *client_key;
   size_t mtu;
@@ -279,6 +293,7 @@ Socket_simple_dtls_connect_ex (const char *host,
   timeout_ms = opts_param->timeout_ms;
   copy_dtls_options (opts_param,
                      &ca_file,
+                     &ca_path,
                      &verify_cert,
                      &client_cert,
                      &client_key,
@@ -294,7 +309,7 @@ Socket_simple_dtls_connect_ex (const char *host,
 
     /* Create and configure DTLS context */
     ctx = create_and_configure_dtls_client_context (
-        ca_file, verify_cert, client_cert, client_key, mtu, alpn, alpn_count);
+        ca_file, ca_path, verify_cert, client_cert, client_key, mtu, alpn, alpn_count);
 
     /* Enable DTLS on socket */
     SocketDTLS_enable (dgram, ctx);
@@ -357,6 +372,7 @@ Socket_simple_dtls_enable (SocketSimple_Socket_T sock,
   /* Copy options before TRY to avoid longjmp clobbering */
   SocketSimple_DTLSOptions opts_local;
   const char *ca_file;
+  const char *ca_path;
   int verify_cert;
   const char *client_cert;
   const char *client_key;
@@ -395,6 +411,7 @@ Socket_simple_dtls_enable (SocketSimple_Socket_T sock,
   /* Copy all values before TRY block */
   copy_dtls_options (opts_param,
                      &ca_file,
+                     &ca_path,
                      &verify_cert,
                      &client_cert,
                      &client_key,
@@ -406,7 +423,7 @@ Socket_simple_dtls_enable (SocketSimple_Socket_T sock,
   {
     /* Create and configure client context */
     ctx = create_and_configure_dtls_client_context (
-        ca_file, verify_cert, client_cert, client_key, mtu, alpn, alpn_count);
+        ca_file, ca_path, verify_cert, client_cert, client_key, mtu, alpn, alpn_count);
 
     /* Enable DTLS */
     SocketDTLS_enable (sock->dgram, ctx);
