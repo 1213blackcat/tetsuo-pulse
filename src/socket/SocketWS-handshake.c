@@ -706,7 +706,17 @@ ws_validate_upgrade_response (SocketWS_T ws,
 
   return 0;
 }
-
+/* Helper: Create HTTP parser for response */
+static SocketHTTP1_Parser_T
+create_http_parser (SocketWS_T ws)
+{
+  SocketHTTP1_Parser_T parser = SocketHTTP1_Parser_new (HTTP1_PARSE_RESPONSE, NULL, ws->arena);
+  if (!parser)
+    {
+      ws_set_error (ws, WS_ERROR_HANDSHAKE, "Failed to create HTTP parser");
+    }
+  return parser;
+}
 int
 ws_handshake_client_init (SocketWS_T ws)
 {
@@ -718,13 +728,9 @@ ws_handshake_client_init (SocketWS_T ws)
   if (ws_build_client_request (ws) < 0)
     return -1;
 
-  ws->handshake.http_parser
-      = SocketHTTP1_Parser_new (HTTP1_PARSE_RESPONSE, NULL, ws->arena);
+  ws->handshake.http_parser = create_http_parser (ws);
   if (!ws->handshake.http_parser)
-    {
-      ws_set_error (ws, WS_ERROR_HANDSHAKE, "Failed to create HTTP parser");
-      return -1;
-    }
+    return -1;
 
   ws->handshake.state = WS_HANDSHAKE_SENDING_REQUEST;
   return 0;
