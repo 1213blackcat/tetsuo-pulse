@@ -3,7 +3,6 @@
  * Copyright (c) 2025 Tetsuo AI
  * https://x.com/tetsuoai
  */
-
 /* SocketWS-transport.c - WebSocket Transport Abstraction Layer
  *
  * Implements pluggable transport backends for WebSocket I/O:
@@ -22,45 +21,37 @@
  * and operational context:
  *
  * - DEBUG level: Transport-layer errors (network timeouts, connection
- *   closed, socket I/O failures). These are expected in normal production
- *   operation and don't indicate bugs or security issues.
+ * closed, socket I/O failures). These are expected in normal production
+ * operation and don't indicate bugs or security issues.
  *
  * - ERROR level: Protocol violations (flow control errors, framing errors)
- *   and resource allocation failures. These indicate bugs, attacks, or
- *   system resource exhaustion.
+ * and resource allocation failures. These indicate bugs, attacks, or
+ * system resource exhaustion.
  *
  * This distinction prevents production logs from being flooded with
  * expected operational errors while ensuring protocol-level issues are
  * visible at the ERROR level for alerting and debugging.
  */
-
 #include "socket/SocketWS-transport.h"
-
 #include "core/Arena.h"
 #include "core/Except.h"
 #include "http/SocketHTTP2-private.h"
 #include "http/SocketHTTP2.h"
 #include "socket/Socket.h"
 #include "socket/SocketBuf.h"
-
 #include <assert.h>
 #include <errno.h>
 #include <string.h>
-
 #undef SOCKET_LOG_COMPONENT
 #define SOCKET_LOG_COMPONENT "SocketWS-transport"
-
 #include "core/SocketUtil.h"
-
 static ssize_t
 socket_transport_send (void *ctx, const void *data, size_t len)
 {
   Socket_T socket = (Socket_T)ctx;
   volatile ssize_t sent = 0;
-
   assert (socket != NULL);
   assert (data != NULL || len == 0);
-
   TRY
   {
     sent = Socket_send (socket, data, len);
@@ -80,19 +71,15 @@ socket_transport_send (void *ctx, const void *data, size_t len)
     return -1;
   }
   END_TRY;
-
   return sent;
 }
-
 static ssize_t
 socket_transport_recv (void *ctx, void *buf, size_t len)
 {
   Socket_T socket = (Socket_T)ctx;
   volatile ssize_t received = 0;
-
   assert (socket != NULL);
   assert (buf != NULL || len == 0);
-
   TRY
   {
     received = Socket_recv (socket, buf, len);
@@ -111,17 +98,13 @@ socket_transport_recv (void *ctx, void *buf, size_t len)
     return 0; /* EOF */
   }
   END_TRY;
-
   return received;
 }
-
 static int
 socket_transport_close (void *ctx, int orderly)
 {
   Socket_T socket = (Socket_T)ctx;
-
   assert (socket != NULL);
-
   if (orderly)
     {
       /* Graceful shutdown - send TCP FIN */
@@ -138,21 +121,16 @@ socket_transport_close (void *ctx, int orderly)
       }
       END_TRY;
     }
-
   /* Socket will be closed when transport is freed or by owner */
   return 0;
 }
-
 static int
 socket_transport_get_fd (void *ctx)
 {
   Socket_T socket = (Socket_T)ctx;
-
   assert (socket != NULL);
-
   return Socket_fd (socket);
 }
-
 static void
 socket_transport_free (void *ctx)
 {
@@ -160,7 +138,6 @@ socket_transport_free (void *ctx)
    * We don't close it here to avoid double-free issues. */
   (void)ctx;
 }
-
 /** Socket transport operations vtable */
 static const SocketWS_TransportOps socket_ops = {
   .send = socket_transport_send,
@@ -169,7 +146,6 @@ static const SocketWS_TransportOps socket_ops = {
   .get_fd = socket_transport_get_fd,
   .free = socket_transport_free,
 };
-
 static int
 h2stream_check_send_state (SocketHTTP2_Stream_T stream)
 {
@@ -181,7 +157,6 @@ h2stream_check_send_state (SocketHTTP2_Stream_T stream)
       errno = EPIPE;
       return -1;
     }
-
   if (stream->end_stream_sent)
     {
       SOCKET_LOG_DEBUG_MSG ("Cannot send after END_STREAM on stream %u",
@@ -189,10 +164,8 @@ h2stream_check_send_state (SocketHTTP2_Stream_T stream)
       errno = EPIPE;
       return -1;
     }
-
   return 0;
 }
-
 static ssize_t
 h2stream_calc_send_len (SocketHTTP2_Stream_T stream,
                         SocketHTTP2_Conn_T conn,
@@ -208,16 +181,13 @@ h2stream_calc_send_len (SocketHTTP2_Stream_T stream,
       errno = EAGAIN;
       return -1;
     }
-
   size_t send_len = requested_len;
   if (send_len > (size_t)available)
     send_len = (size_t)available;
   if (send_len > conn->peer_settings[SETTINGS_IDX_MAX_FRAME_SIZE])
     send_len = conn->peer_settings[SETTINGS_IDX_MAX_FRAME_SIZE];
-
   return (ssize_t)send_len;
 }
-
 static ssize_t
 h2stream_transport_send (void *ctx, const void *data, size_t len)
 {
@@ -225,66 +195,51 @@ h2stream_transport_send (void *ctx, const void *data, size_t len)
   SocketHTTP2_Conn_T conn;
   SocketHTTP2_FrameHeader header;
   ssize_t send_len;
-
   assert (stream != NULL);
   assert (stream->conn != NULL);
   assert (data != NULL || len == 0);
-
   if (len == 0)
     return 0;
-
   conn = stream->conn;
-
   if (h2stream_check_send_state (stream) != 0)
     return -1;
-
   send_len = h2stream_calc_send_len (stream, conn, len);
   if (send_len < 0)
     return -1;
-
   if (http2_flow_consume_send (conn, stream, (size_t)send_len) != 0)
     {
       SOCKET_LOG_ERROR_MSG ("Failed to consume flow control window");
       errno = ENOSPC;
       return -1;
     }
-
   memset (&header, 0, sizeof (header));
   header.length = (uint32_t)send_len;
   header.type = 0x0;
   header.flags = 0;
   header.stream_id = stream->id;
-
   if (http2_frame_send (conn, &header, data, (size_t)send_len) != 0)
     {
       SOCKET_LOG_ERROR_MSG ("Failed to queue DATA frame");
       errno = EIO;
       return -1;
     }
-
   SOCKET_LOG_DEBUG_MSG (
       "Queued %zu bytes as DATA on stream %u", (size_t)send_len, stream->id);
-
   return send_len;
 }
-
 static ssize_t
 h2stream_transport_recv (void *ctx, void *buf, size_t len)
 {
   SocketHTTP2_Stream_T stream = (SocketHTTP2_Stream_T)ctx;
   size_t available;
   size_t read_len;
-
   assert (stream != NULL);
   assert (stream->conn != NULL);
   assert (buf != NULL || len == 0);
-
   if (len == 0)
     return 0;
-
   /* Check if stream receive buffer has data */
   available = SocketBuf_available (stream->recv_buf);
-
   if (available == 0)
     {
       /* No data available */
@@ -297,10 +252,8 @@ h2stream_transport_recv (void *ctx, void *buf, size_t len)
       errno = EAGAIN;
       return -1;
     }
-
   /* Read from recv buffer */
   read_len = (len < available) ? len : available;
-
   if ((size_t)SocketBuf_read (stream->recv_buf, buf, read_len) != read_len)
     {
       /* Protocol error - buffer read failed despite available data */
@@ -308,10 +261,8 @@ h2stream_transport_recv (void *ctx, void *buf, size_t len)
       errno = EIO;
       return -1;
     }
-
   SOCKET_LOG_DEBUG_MSG (
       "Read %zu bytes from stream %u recv buffer", read_len, stream->id);
-
   /* Send WINDOW_UPDATE to replenish flow control window */
   if (http2_flow_update_recv (stream->conn, stream, (uint32_t)read_len) != 0)
     {
@@ -319,22 +270,17 @@ h2stream_transport_recv (void *ctx, void *buf, size_t len)
                             stream->id);
       /* Non-fatal - continue */
     }
-
   return (ssize_t)read_len;
 }
-
 static int
 h2stream_transport_close (void *ctx, int orderly)
 {
   SocketHTTP2_Stream_T stream = (SocketHTTP2_Stream_T)ctx;
   SocketHTTP2_Conn_T conn;
   SocketHTTP2_FrameHeader header;
-
   assert (stream != NULL);
   assert (stream->conn != NULL);
-
   conn = stream->conn;
-
   /* Abnormal close path - send RST_STREAM and exit early */
   if (!orderly)
     {
@@ -342,23 +288,19 @@ h2stream_transport_close (void *ctx, int orderly)
       SOCKET_LOG_DEBUG_MSG ("Sent RST_STREAM CANCEL on stream %u", stream->id);
       return 0;
     }
-
   /* Orderly close - check if END_STREAM already sent */
   if (stream->end_stream_sent)
     return 0;
-
   /* Check if stream is in a state where we can send END_STREAM */
   if (stream->state != HTTP2_STREAM_STATE_OPEN
       && stream->state != HTTP2_STREAM_STATE_HALF_CLOSED_REMOTE)
     return 0;
-
   /* Send empty DATA frame with END_STREAM flag */
   memset (&header, 0, sizeof (header));
   header.length = 0;
-  header.type = 0x0;  /* DATA frame type */
+  header.type = 0x0; /* DATA frame type */
   header.flags = 0x1; /* END_STREAM flag */
   header.stream_id = stream->id;
-
   if (http2_frame_send (conn, &header, NULL, 0) == 0)
     {
       stream->end_stream_sent = 1;
@@ -369,10 +311,8 @@ h2stream_transport_close (void *ctx, int orderly)
       SOCKET_LOG_WARN_MSG ("Failed to send END_STREAM on stream %u",
                            stream->id);
     }
-
   return 0;
 }
-
 static int
 h2stream_transport_get_fd (void *ctx)
 {
@@ -381,7 +321,6 @@ h2stream_transport_get_fd (void *ctx)
    * Callers should poll the underlying connection socket. */
   return -1;
 }
-
 static void
 h2stream_transport_free (void *ctx)
 {
@@ -389,7 +328,6 @@ h2stream_transport_free (void *ctx)
    * We don't destroy it here to avoid issues with ongoing operations. */
   (void)ctx;
 }
-
 /** HTTP/2 stream transport operations vtable */
 static const SocketWS_TransportOps h2stream_ops = {
   .send = h2stream_transport_send,
@@ -398,80 +336,70 @@ static const SocketWS_TransportOps h2stream_ops = {
   .get_fd = h2stream_transport_get_fd,
   .free = h2stream_transport_free,
 };
-
-SocketWS_Transport_T
-SocketWS_Transport_socket (Arena_T arena, Socket_T socket, int is_client)
+/* Helper: Allocate transport struct */
+static SocketWS_Transport_T
+alloc_transport_struct (Arena_T arena)
 {
-  SocketWS_Transport_T transport;
-
-  assert (arena != NULL);
-  assert (socket != NULL);
-
-  transport = Arena_alloc (arena, sizeof (*transport), __FILE__, __LINE__);
+  SocketWS_Transport_T transport = Arena_alloc (arena, sizeof (*transport), __FILE__, __LINE__);
   if (transport == NULL)
     {
       /* Resource exhaustion - system out of memory */
       SOCKET_LOG_ERROR_MSG ("Failed to allocate socket transport");
       return NULL;
     }
-
+  return transport;
+}
+SocketWS_Transport_T
+SocketWS_Transport_socket (Arena_T arena, Socket_T socket, int is_client)
+{
+  SocketWS_Transport_T transport;
+  assert (arena != NULL);
+  assert (socket != NULL);
+  transport = alloc_transport_struct (arena);
+  if (transport == NULL)
+    return NULL;
   transport->type = SOCKETWS_TRANSPORT_SOCKET;
   transport->ops = &socket_ops;
   transport->ctx = socket;
   transport->arena = arena;
   transport->requires_masking = is_client ? 1 : 0;
-
   SOCKET_LOG_DEBUG_MSG (
       "Created socket transport (fd=%d, is_client=%d, masking=%d)",
       Socket_fd (socket),
       is_client,
       transport->requires_masking);
-
   return transport;
 }
-
 SocketWS_Transport_T
 SocketWS_Transport_h2stream (Arena_T arena, SocketHTTP2_Stream_T stream)
 {
   SocketWS_Transport_T transport;
-
   assert (arena != NULL);
   assert (stream != NULL);
-
-  transport = Arena_alloc (arena, sizeof (*transport), __FILE__, __LINE__);
+  transport = alloc_transport_struct (arena);
   if (transport == NULL)
-    {
-      /* Resource exhaustion - system out of memory */
-      SOCKET_LOG_ERROR_MSG ("Failed to allocate H2 stream transport");
-      return NULL;
-    }
-
+    return NULL;
   transport->type = SOCKETWS_TRANSPORT_H2STREAM;
   transport->ops = &h2stream_ops;
   transport->ctx = stream;
   transport->arena = arena;
   transport->requires_masking = 0; /* RFC 8441: No masking for HTTP/2 */
-
   SOCKET_LOG_DEBUG_MSG ("Created H2 stream transport (stream_id=%u, masking=0)",
                         stream->id);
-
   return transport;
 }
-
 SocketWS_TransportType
 SocketWS_Transport_type (SocketWS_Transport_T transport)
 {
   assert (transport != NULL);
   return transport->type;
 }
-
 int
 SocketWS_Transport_requires_masking (SocketWS_Transport_T transport)
 {
   assert (transport != NULL);
   return transport->requires_masking;
 }
-
 ssize_t
 SocketWS_Transport_send (SocketWS_Transport_T transport,
                          const void *data,
@@ -480,76 +408,58 @@ SocketWS_Transport_send (SocketWS_Transport_T transport,
   assert (transport != NULL);
   assert (transport->ops != NULL);
   assert (transport->ops->send != NULL);
-
   return transport->ops->send (transport->ctx, data, len);
 }
-
 ssize_t
 SocketWS_Transport_recv (SocketWS_Transport_T transport, void *buf, size_t len)
 {
   assert (transport != NULL);
   assert (transport->ops != NULL);
   assert (transport->ops->recv != NULL);
-
   return transport->ops->recv (transport->ctx, buf, len);
 }
-
 int
 SocketWS_Transport_close (SocketWS_Transport_T transport, int orderly)
 {
   assert (transport != NULL);
   assert (transport->ops != NULL);
   assert (transport->ops->close != NULL);
-
   return transport->ops->close (transport->ctx, orderly);
 }
-
 int
 SocketWS_Transport_get_fd (SocketWS_Transport_T transport)
 {
   assert (transport != NULL);
   assert (transport->ops != NULL);
   assert (transport->ops->get_fd != NULL);
-
   return transport->ops->get_fd (transport->ctx);
 }
-
 void
 SocketWS_Transport_free (SocketWS_Transport_T *transport)
 {
   assert (transport != NULL);
-
   if (*transport == NULL)
     return;
-
   /* Call backend-specific free */
   if ((*transport)->ops && (*transport)->ops->free)
     (*transport)->ops->free ((*transport)->ctx);
-
   /* Transport struct itself is arena-allocated, don't free it */
   *transport = NULL;
-
   SOCKET_LOG_DEBUG_MSG ("Freed transport resources");
 }
-
 Socket_T
 SocketWS_Transport_get_socket (SocketWS_Transport_T transport)
 {
   assert (transport != NULL);
-
   if (transport->type != SOCKETWS_TRANSPORT_SOCKET)
     return NULL;
-
   return (Socket_T)transport->ctx;
 }
-
 SocketHTTP2_Stream_T
 SocketWS_Transport_get_h2stream (SocketWS_Transport_T transport)
 {
   assert (transport != NULL);
-
   if (transport->type != SOCKETWS_TRANSPORT_H2STREAM)
     return NULL;
-
   return (SocketHTTP2_Stream_T)transport->ctx;
 }
