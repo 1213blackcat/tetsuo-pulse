@@ -3,19 +3,14 @@
  * Copyright (c) 2025 Tetsuo AI
  * https://x.com/tetsuoai
  */
-
 /**
  * @file SocketSimple-dns.c
  * @brief DNS implementation for Simple API using SocketDNS module.
  */
-
 #include "SocketSimple-internal.h"
-
 #include "socket/SocketCommon.h"
 #include "dns/SocketDNS.h"
-
 #include <netdb.h>
-
 /**
  * @brief Count the number of addresses in an addrinfo linked list.
  * @param res The addrinfo list to count.
@@ -29,7 +24,6 @@ count_addrinfo (struct addrinfo *res)
     count++;
   return count;
 }
-
 /**
  * @brief Securely clear memory before freeing to prevent data leakage.
  * @param ptr Pointer to memory to clear.
@@ -40,7 +34,6 @@ secure_clear_memory (void *ptr, size_t len)
 {
   if (!ptr || len == 0)
     return;
-
 #ifdef __linux__
   explicit_bzero (ptr, len);
 #else
@@ -49,7 +42,6 @@ secure_clear_memory (void *ptr, size_t len)
     *vptr++ = 0;
 #endif
 }
-
 /**
  * @brief Perform synchronous DNS resolution with exception handling.
  * @param dns The DNS resolver instance.
@@ -67,7 +59,6 @@ resolve_hostname_sync (SocketDNS_T dns,
                        int *exception_occurred)
 {
   struct addrinfo *volatile res = NULL;
-
   TRY
   {
     res = SocketDNS_resolve_sync (dns, hostname, 0, hints, timeout_ms);
@@ -87,10 +78,8 @@ resolve_hostname_sync (SocketDNS_T dns,
       }
   }
   END_TRY;
-
   return res;
 }
-
 /**
  * @brief Convert addrinfo linked list to SocketSimple_DNSResult.
  * @param res The addrinfo list to convert.
@@ -102,20 +91,17 @@ convert_addrinfo_to_result (struct addrinfo *res,
                             SocketSimple_DNSResult *result)
 {
   int count = count_addrinfo (res);
-
   if (count == 0)
     {
       simple_set_error (SOCKET_SIMPLE_ERR_DNS, "No addresses found");
       return -1;
     }
-
   result->addresses = calloc ((size_t)count + 1, sizeof (char *));
   if (!result->addresses)
     {
       simple_set_error (SOCKET_SIMPLE_ERR_MEMORY, "Memory allocation failed");
       return -1;
     }
-
   int i = 0;
   for (struct addrinfo *p = res; p != NULL && i < count; p = p->ai_next)
     {
@@ -151,10 +137,8 @@ convert_addrinfo_to_result (struct addrinfo *res,
           i++;
         }
     }
-
   result->count = i;
   result->family = res->ai_family;
-
   if (result->count == 0)
     {
       free (result->addresses);
@@ -162,12 +146,9 @@ convert_addrinfo_to_result (struct addrinfo *res,
       simple_set_error (SOCKET_SIMPLE_ERR_DNS, "Failed to resolve addresses");
       return -1;
     }
-
   return 0;
 }
-
 #define SOCKET_SIMPLE_DNS_DEFAULT_TIMEOUT_MS 5000
-
 int
 Socket_simple_dns_resolve_timeout (const char *hostname,
                                    SocketSimple_DNSResult *result,
@@ -176,71 +157,67 @@ Socket_simple_dns_resolve_timeout (const char *hostname,
   volatile int exception_occurred = 0;
   struct addrinfo hints;
   struct addrinfo *res = NULL;
-
   Socket_simple_clear_error ();
-
   if (!hostname || !result)
     {
       simple_set_error (SOCKET_SIMPLE_ERR_INVALID_ARG, "Invalid argument");
       return -1;
     }
-
   memset (result, 0, sizeof (*result));
-
   SocketDNS_T dns = SocketCommon_get_dns_resolver ();
   if (!dns)
     {
       simple_set_error (SOCKET_SIMPLE_ERR_DNS, "DNS resolver not available");
       return -1;
     }
-
   SocketCommon_setup_hints (&hints, SOCK_STREAM, 0);
-
   /* Resolve hostname with exception handling */
   res = resolve_hostname_sync (
       dns, hostname, &hints, timeout_ms, (int *)&exception_occurred);
   if (exception_occurred)
     return -1;
-
   if (!res)
     {
       simple_set_error (SOCKET_SIMPLE_ERR_TIMEOUT, "DNS resolution timed out");
       return -1;
     }
-
   /* Convert addrinfo to result structure */
   int ret = convert_addrinfo_to_result (res, result);
   SocketCommon_free_addrinfo (res);
-
   return ret;
 }
-
 int
 Socket_simple_dns_resolve (const char *hostname, SocketSimple_DNSResult *result)
 {
   return Socket_simple_dns_resolve_timeout (
       hostname, result, SOCKET_SIMPLE_DNS_DEFAULT_TIMEOUT_MS);
 }
-
 int
 Socket_simple_dns_lookup (const char *hostname, char *buf, size_t len)
 {
   SocketSimple_DNSResult result;
-
   if (Socket_simple_dns_resolve (hostname, &result) != 0)
     {
       return -1;
     }
-
   if (result.count > 0 && result.addresses[0])
     {
       snprintf (buf, len, "%s", result.addresses[0]);
     }
-
   Socket_simple_dns_result_free (&result);
   return 0;
 }
-
+/**
+ * @brief Setup hints for family-specific DNS resolution.
+ * @param hints Output parameter for addrinfo hints.
+ * @param family The address family to set (AF_INET or AF_INET6).
+ */
+static void
+setup_hints_for_family (struct addrinfo *hints, int family)
+{
+  SocketCommon_setup_hints (hints, SOCK_STREAM, 0);
+  hints->ai_family = family;
+}
 /**
  * @brief Resolve a hostname for a specific address family using TRY/EXCEPT.
  * @param dns The DNS resolver instance.
@@ -255,7 +232,6 @@ dns_resolve_family_sync (SocketDNS_T dns,
 {
   volatile struct addrinfo *res = NULL;
   volatile int exception_occurred = 0;
-
   TRY
   {
     res = SocketDNS_resolve_sync (
@@ -275,10 +251,8 @@ dns_resolve_family_sync (SocketDNS_T dns,
       }
   }
   END_TRY;
-
   return exception_occurred ? NULL : (struct addrinfo *)res;
 }
-
 /**
  * @brief Extract numeric address string from an addrinfo result.
  * @param res The addrinfo to extract the address from.
@@ -290,7 +264,6 @@ static int
 dns_addrinfo_to_string (struct addrinfo *res, char *buf, size_t len)
 {
   char host[NI_MAXHOST];
-
   if (SocketCommon_reverse_lookup (res->ai_addr,
                                    res->ai_addrlen,
                                    host,
@@ -304,11 +277,9 @@ dns_addrinfo_to_string (struct addrinfo *res, char *buf, size_t len)
       snprintf (buf, len, "%s", host);
       return 0;
     }
-
   simple_set_error (SOCKET_SIMPLE_ERR_DNS, "Failed to get address string");
   return -1;
 }
-
 /**
  * @brief Perform DNS lookup for a specific address family.
  * @param hostname The hostname to resolve.
@@ -323,25 +294,19 @@ dns_lookup_family (const char *hostname, char *buf, size_t len, int family)
   struct addrinfo hints;
   struct addrinfo *res;
   int ret;
-
   Socket_simple_clear_error ();
-
   if (!hostname || !buf)
     {
       simple_set_error (SOCKET_SIMPLE_ERR_INVALID_ARG, "Invalid argument");
       return -1;
     }
-
   SocketDNS_T dns = SocketCommon_get_dns_resolver ();
   if (!dns)
     {
       simple_set_error (SOCKET_SIMPLE_ERR_DNS, "DNS resolver not available");
       return -1;
     }
-
-  SocketCommon_setup_hints (&hints, SOCK_STREAM, 0);
-  hints.ai_family = family;
-
+  setup_hints_for_family (&hints, family);
   res = dns_resolve_family_sync (dns, hostname, &hints);
   if (!res)
     {
@@ -351,24 +316,38 @@ dns_lookup_family (const char *hostname, char *buf, size_t len, int family)
                                             : "No IPv6 address found");
       return -1;
     }
-
   ret = dns_addrinfo_to_string (res, buf, len);
   SocketCommon_free_addrinfo (res);
   return ret;
 }
-
 int
 Socket_simple_dns_lookup4 (const char *hostname, char *buf, size_t len)
 {
   return dns_lookup_family (hostname, buf, len, AF_INET);
 }
-
 int
 Socket_simple_dns_lookup6 (const char *hostname, char *buf, size_t len)
 {
   return dns_lookup_family (hostname, buf, len, AF_INET6);
 }
-
+/**
+ * @brief Validate input parameters for reverse DNS lookup.
+ * @param ip The IP address string to validate.
+ * @param hostname Output buffer to validate.
+ * @param len Size of the output buffer.
+ * @return 0 if valid, -1 on error (error is set).
+ */
+static int
+dns_reverse_validate_input (const char *ip, char *hostname, size_t len)
+{
+  Socket_simple_clear_error ();
+  if (!ip || !hostname)
+    {
+      simple_set_error (SOCKET_SIMPLE_ERR_INVALID_ARG, "Invalid argument");
+      return -1;
+    }
+  return 0;
+}
 /**
  * @brief Resolve an IP address string to addrinfo using AI_NUMERICHOST.
  * @param ip The IP address string to resolve.
@@ -379,15 +358,12 @@ static int
 dns_reverse_parse_ip (const char *ip, struct addrinfo **res)
 {
   struct addrinfo hints;
-
   if (!SocketCommon_parse_ip (ip, NULL))
     {
       simple_set_error (SOCKET_SIMPLE_ERR_INVALID_ARG, "Invalid IP address");
       return -1;
     }
-
   SocketCommon_setup_hints (&hints, SOCK_STREAM, AI_NUMERICHOST);
-
   if (SocketCommon_resolve_address (
           ip, 0, &hints, res, SocketCommon_Failed, AF_UNSPEC, 0)
       != 0)
@@ -395,27 +371,18 @@ dns_reverse_parse_ip (const char *ip, struct addrinfo **res)
       simple_set_error (SOCKET_SIMPLE_ERR_DNS, "Invalid IP address format");
       return -1;
     }
-
   return 0;
 }
-
-int
-Socket_simple_dns_reverse (const char *ip, char *hostname, size_t len)
+/**
+ * @brief Perform the actual reverse lookup using SocketCommon_reverse_lookup.
+ * @param res The addrinfo containing the address to lookup.
+ * @param hostname Buffer to store the hostname.
+ * @param len Size of the buffer.
+ * @return 0 on success, -1 on error (error is set).
+ */
+static int
+dns_reverse_perform_lookup (struct addrinfo *res, char *hostname, size_t len)
 {
-  struct addrinfo *res = NULL;
-  int ret = -1;
-
-  Socket_simple_clear_error ();
-
-  if (!ip || !hostname)
-    {
-      simple_set_error (SOCKET_SIMPLE_ERR_INVALID_ARG, "Invalid argument");
-      return -1;
-    }
-
-  if (dns_reverse_parse_ip (ip, &res) != 0)
-    return -1;
-
   if (SocketCommon_reverse_lookup (res->ai_addr,
                                    res->ai_addrlen,
                                    hostname,
@@ -425,20 +392,28 @@ Socket_simple_dns_reverse (const char *ip, char *hostname, size_t len)
                                    0,
                                    SocketCommon_Failed)
       == 0)
-    ret = 0;
-  else
-    simple_set_error (SOCKET_SIMPLE_ERR_DNS, "Reverse lookup failed");
-
+    return 0;
+  simple_set_error (SOCKET_SIMPLE_ERR_DNS, "Reverse lookup failed");
+  return -1;
+}
+int
+Socket_simple_dns_reverse (const char *ip, char *hostname, size_t len)
+{
+  struct addrinfo *res = NULL;
+  int ret = -1;
+  if (dns_reverse_validate_input (ip, hostname, len) != 0)
+    return -1;
+  if (dns_reverse_parse_ip (ip, &res) != 0)
+    return -1;
+  ret = dns_reverse_perform_lookup (res, hostname, len);
   SocketCommon_free_addrinfo (res);
   return ret;
 }
-
 void
 Socket_simple_dns_result_free (SocketSimple_DNSResult *result)
 {
   if (!result)
     return;
-
   if (result->addresses)
     {
       for (int i = 0; i < result->count; i++)
@@ -454,12 +429,10 @@ Socket_simple_dns_result_free (SocketSimple_DNSResult *result)
     }
   memset (result, 0, sizeof (*result));
 }
-
 struct SocketSimple_DNS
 {
   SocketDNS_T dns;
 };
-
 struct SocketSimple_DNSRequest
 {
   SocketDNS_Request_T *core_req;
@@ -468,7 +441,6 @@ struct SocketSimple_DNSRequest
   int error;
   struct addrinfo *result;
 };
-
 /* Callback wrapper for async mode */
 struct simple_dns_callback_ctx
 {
@@ -476,7 +448,6 @@ struct simple_dns_callback_ctx
   void *userdata;
   SocketDNS_T dns;
 };
-
 static void
 simple_dns_callback_wrapper (SocketDNS_Request_T *req,
                              struct addrinfo *result,
@@ -485,17 +456,13 @@ simple_dns_callback_wrapper (SocketDNS_Request_T *req,
 {
   struct simple_dns_callback_ctx *ctx = data;
   SocketSimple_DNSResult simple_result;
-
   (void)req;
-
   memset (&simple_result, 0, sizeof (simple_result));
-
   if (error == 0 && result)
     {
       /* Use helper to convert addrinfo to simple result */
       convert_addrinfo_to_result (result, &simple_result);
     }
-
   /* Call user callback */
   if (ctx->callback)
     {
@@ -504,22 +471,18 @@ simple_dns_callback_wrapper (SocketDNS_Request_T *req,
                      error,
                      ctx->userdata);
     }
-
   /* Cleanup */
   Socket_simple_dns_result_free (&simple_result);
   if (result)
     SocketCommon_free_addrinfo (result);
   free (ctx);
 }
-
 SocketSimple_DNS_T
 Socket_simple_dns_new (void)
 {
   volatile SocketDNS_T dns = NULL;
   struct SocketSimple_DNS *handle = NULL;
-
   Socket_simple_clear_error ();
-
   TRY
   {
     dns = SocketDNS_new ();
@@ -530,13 +493,11 @@ Socket_simple_dns_new (void)
     return NULL;
   }
   END_TRY;
-
   if (!dns)
     {
       simple_set_error (SOCKET_SIMPLE_ERR_DNS, "Failed to create DNS resolver");
       return NULL;
     }
-
   handle = calloc (1, sizeof (*handle));
   if (!handle)
     {
@@ -544,28 +505,22 @@ Socket_simple_dns_new (void)
       SocketDNS_free ((SocketDNS_T *)&dns);
       return NULL;
     }
-
   handle->dns = dns;
   return handle;
 }
-
 void
 Socket_simple_dns_free (SocketSimple_DNS_T *dns)
 {
   if (!dns || !*dns)
     return;
-
   struct SocketSimple_DNS *handle = *dns;
-
   if (handle->dns)
     {
       SocketDNS_free (&handle->dns);
     }
-
   free (handle);
   *dns = NULL;
 }
-
 void
 Socket_simple_dns_set_timeout (SocketSimple_DNS_T dns, int timeout_ms)
 {
@@ -573,7 +528,6 @@ Socket_simple_dns_set_timeout (SocketSimple_DNS_T dns, int timeout_ms)
     return;
   SocketDNS_settimeout (dns->dns, timeout_ms);
 }
-
 int
 Socket_simple_dns_get_timeout (SocketSimple_DNS_T dns)
 {
@@ -581,13 +535,11 @@ Socket_simple_dns_get_timeout (SocketSimple_DNS_T dns)
     return 0;
   return SocketDNS_gettimeout (dns->dns);
 }
-
 void
 Socket_simple_dns_set_max_pending (SocketSimple_DNS_T dns, size_t max_pending)
 {
   if (!dns || !dns->dns)
     return;
-
   TRY
   {
     SocketDNS_setmaxpending (dns->dns, max_pending);
@@ -597,7 +549,6 @@ Socket_simple_dns_set_max_pending (SocketSimple_DNS_T dns, size_t max_pending)
   }
   END_TRY;
 }
-
 void
 Socket_simple_dns_prefer_ipv6 (SocketSimple_DNS_T dns, int prefer_ipv6)
 {
@@ -605,7 +556,6 @@ Socket_simple_dns_prefer_ipv6 (SocketSimple_DNS_T dns, int prefer_ipv6)
     return;
   SocketDNS_prefer_ipv6 (dns->dns, prefer_ipv6);
 }
-
 int
 Socket_simple_dns_resolve_async (SocketSimple_DNS_T dns,
                                  const char *hostname,
@@ -613,26 +563,21 @@ Socket_simple_dns_resolve_async (SocketSimple_DNS_T dns,
                                  void *userdata)
 {
   struct simple_dns_callback_ctx *ctx;
-
   Socket_simple_clear_error ();
-
   if (!dns || !dns->dns || !hostname || !callback)
     {
       simple_set_error (SOCKET_SIMPLE_ERR_INVALID_ARG, "Invalid argument");
       return -1;
     }
-
   ctx = malloc (sizeof (*ctx));
   if (!ctx)
     {
       simple_set_error (SOCKET_SIMPLE_ERR_MEMORY, "Memory allocation failed");
       return -1;
     }
-
   ctx->callback = callback;
   ctx->userdata = userdata;
   ctx->dns = dns->dns;
-
   TRY
   {
     SocketDNS_resolve (dns->dns, hostname, 0, simple_dns_callback_wrapper, ctx);
@@ -644,10 +589,40 @@ Socket_simple_dns_resolve_async (SocketSimple_DNS_T dns,
     return -1;
   }
   END_TRY;
-
   return 0;
 }
-
+/**
+ * @brief Validate input parameters for starting async DNS resolution.
+ * @param dns The DNS handle to validate.
+ * @param hostname The hostname to validate.
+ * @return 0 if valid, -1 on error (error is set).
+ */
+static int
+dns_resolve_start_validate (SocketSimple_DNS_T dns, const char *hostname)
+{
+  Socket_simple_clear_error ();
+  if (!dns || !dns->dns || !hostname)
+    {
+      simple_set_error (SOCKET_SIMPLE_ERR_INVALID_ARG, "Invalid argument");
+      return -1;
+    }
+  return 0;
+}
+/**
+ * @brief Allocate and initialize the DNS request handle.
+ * @return The allocated handle, or NULL on error (error is set).
+ */
+static struct SocketSimple_DNSRequest *
+dns_resolve_start_alloc_handle (void)
+{
+  struct SocketSimple_DNSRequest *handle = calloc (1, sizeof (*handle));
+  if (!handle)
+    {
+      simple_set_error (SOCKET_SIMPLE_ERR_MEMORY, "Memory allocation failed");
+      return NULL;
+    }
+  return handle;
+}
 /**
  * @brief Submit an async DNS resolution request with exception handling.
  * @param dns The DNS resolver instance.
@@ -659,7 +634,6 @@ dns_resolve_start_submit (SocketDNS_T dns, const char *hostname)
 {
   SocketDNS_Request_T *volatile req = NULL;
   volatile int exception_occurred = 0;
-
   TRY
   {
     req = SocketDNS_resolve (dns, hostname, 0, NULL, NULL);
@@ -670,50 +644,32 @@ dns_resolve_start_submit (SocketDNS_T dns, const char *hostname)
     exception_occurred = 1;
   }
   END_TRY;
-
   if (exception_occurred)
     return NULL;
-
   if (!req)
     simple_set_error (SOCKET_SIMPLE_ERR_DNS, "Failed to start DNS resolution");
-
   return (SocketDNS_Request_T *)req;
 }
-
 SocketSimple_DNSRequest_T
 Socket_simple_dns_resolve_start (SocketSimple_DNS_T dns, const char *hostname)
 {
   struct SocketSimple_DNSRequest *handle;
   SocketDNS_Request_T *req;
-
-  Socket_simple_clear_error ();
-
-  if (!dns || !dns->dns || !hostname)
-    {
-      simple_set_error (SOCKET_SIMPLE_ERR_INVALID_ARG, "Invalid argument");
-      return NULL;
-    }
-
-  handle = calloc (1, sizeof (*handle));
+  if (dns_resolve_start_validate (dns, hostname) != 0)
+    return NULL;
+  handle = dns_resolve_start_alloc_handle ();
   if (!handle)
-    {
-      simple_set_error (SOCKET_SIMPLE_ERR_MEMORY, "Memory allocation failed");
-      return NULL;
-    }
-
+    return NULL;
   req = dns_resolve_start_submit (dns->dns, hostname);
   if (!req)
     {
       free (handle);
       return NULL;
     }
-
   handle->core_req = req;
   handle->dns = dns->dns;
-
   return (SocketSimple_DNSRequest_T)handle;
 }
-
 int
 Socket_simple_dns_pollfd (SocketSimple_DNS_T dns)
 {
@@ -721,7 +677,6 @@ Socket_simple_dns_pollfd (SocketSimple_DNS_T dns)
     return -1;
   return SocketDNS_pollfd (dns->dns);
 }
-
 int
 Socket_simple_dns_check (SocketSimple_DNS_T dns)
 {
@@ -729,13 +684,11 @@ Socket_simple_dns_check (SocketSimple_DNS_T dns)
     return 0;
   return SocketDNS_check (dns->dns);
 }
-
 int
 Socket_simple_dns_request_done (SocketSimple_DNSRequest_T req)
 {
   if (!req || !req->core_req || !req->dns)
     return 1; /* Consider invalid as done */
-
   /* Check if result is available */
   struct addrinfo *result = SocketDNS_getresult (req->dns, req->core_req);
   if (result)
@@ -745,7 +698,6 @@ Socket_simple_dns_request_done (SocketSimple_DNSRequest_T req)
       req->complete = 1;
       return 1;
     }
-
   /* Check for error without result */
   int err = SocketDNS_geterror (req->dns, req->core_req);
   if (err != 0)
@@ -754,46 +706,37 @@ Socket_simple_dns_request_done (SocketSimple_DNSRequest_T req)
       req->complete = 1;
       return 1;
     }
-
   return 0;
 }
-
 int
 Socket_simple_dns_request_result (SocketSimple_DNSRequest_T req,
                                   SocketSimple_DNSResult *result)
 {
   Socket_simple_clear_error ();
-
   if (!req || !result)
     {
       simple_set_error (SOCKET_SIMPLE_ERR_INVALID_ARG, "Invalid argument");
       return -1;
     }
-
   memset (result, 0, sizeof (*result));
-
   if (!req->complete)
     {
       simple_set_error (SOCKET_SIMPLE_ERR_DNS, "Request not complete");
       return -1;
     }
-
   if (req->error != 0)
     {
       simple_set_error (SOCKET_SIMPLE_ERR_DNS, "DNS resolution failed");
       return -1;
     }
-
   if (!req->result)
     {
       simple_set_error (SOCKET_SIMPLE_ERR_DNS, "No result available");
       return -1;
     }
-
   /* Use helper to convert addrinfo to simple result */
   return convert_addrinfo_to_result (req->result, result);
 }
-
 int
 Socket_simple_dns_request_error (SocketSimple_DNSRequest_T req)
 {
@@ -801,34 +744,27 @@ Socket_simple_dns_request_error (SocketSimple_DNSRequest_T req)
     return -1;
   return req->error;
 }
-
 void
 Socket_simple_dns_request_cancel (SocketSimple_DNS_T dns,
                                   SocketSimple_DNSRequest_T req)
 {
   if (!dns || !dns->dns || !req || !req->core_req)
     return;
-
   SocketDNS_cancel (dns->dns, req->core_req);
   req->complete = 1;
   req->error = -1;
 }
-
 void
 Socket_simple_dns_request_free (SocketSimple_DNSRequest_T *req)
 {
   if (!req || !*req)
     return;
-
   struct SocketSimple_DNSRequest *handle = *req;
-
   if (handle->result)
     SocketCommon_free_addrinfo (handle->result);
-
   free (handle);
   *req = NULL;
 }
-
 void
 Socket_simple_dns_cache_clear (SocketSimple_DNS_T dns)
 {
@@ -836,7 +772,6 @@ Socket_simple_dns_cache_clear (SocketSimple_DNS_T dns)
     return;
   SocketDNS_cache_clear (dns->dns);
 }
-
 void
 Socket_simple_dns_cache_set_ttl (SocketSimple_DNS_T dns, int ttl_seconds)
 {
